@@ -1,0 +1,2 @@
+Add a log console to show status
+Add a Progress bar
