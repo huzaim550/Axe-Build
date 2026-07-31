@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import Link from "next/link";
 import { db } from "@mybuild/db";
 import { token } from "@/lib/auth";
 import { AutoRefresh } from "./auto-refresh";
@@ -68,6 +69,7 @@ export default async function Home() {
               <th style={th}>Duration</th>
               <th style={th}>Size</th>
               <th style={th}>Started</th>
+              <th style={th}>Log</th>
               <th style={th}>Artifact</th>
             </tr>
           </thead>
@@ -92,6 +94,11 @@ export default async function Home() {
                 <td style={td}>{fmtDuration(b.startedAt, b.finishedAt)}</td>
                 <td style={td}>{fmtBytes(b.sizeBytes)}</td>
                 <td style={td}>{b.createdAt.toLocaleString()}</td>
+                <td style={td}>
+                  <Link href={`/builds/${b.id}`} style={{ color: "#3b82f6" }}>
+                    view
+                  </Link>
+                </td>
                 <td style={td}>
                   {b.status === "success" && b.artifactPath ? (
                     <a

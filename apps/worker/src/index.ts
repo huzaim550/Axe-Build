@@ -2,6 +2,7 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { Worker, type Job } from "bullmq";
+import Redis from "ioredis";
 import { db } from "@mybuild/db";
 import { AndroidRunner } from "./android.js";
 import type { BuildSpec } from "./runner.js";
@@ -13,6 +14,21 @@ const BUILD_TIMEOUT_MS = Number(process.env.BUILD_TIMEOUT_MS ?? 60 * 60 * 1000);
 function redisConnection() {
   const url = new URL(process.env.REDIS_URL ?? "redis://redis:6379");
   return { host: url.hostname, port: Number(url.port || 6379) };
+}
+
+// Single long-lived publisher for the process (concurrency is 1, so no fan-out needed).
+const publisher = new Redis(redisConnection());
+
+function publishLog(buildId: string, line: string): void {
+  publisher.publish(`logs:${buildId}`, JSON.stringify({ type: "log", line })).catch((err) => {
+    console.error(`[${buildId}] log publish failed:`, err);
+  });
+}
+
+function publishDone(buildId: string, status: string): void {
+  publisher.publish(`logs:${buildId}`, JSON.stringify({ type: "done", status })).catch((err) => {
+    console.error(`[${buildId}] done publish failed:`, err);
+  });
 }
 
 /** The web container runs `prisma db push` on startup; wait until the schema exists. */
@@ -70,6 +86,7 @@ async function processBuild(job: Job<{ buildId: string }>): Promise<void> {
     let step = await gen.next();
     while (!step.done) {
       log.write(step.value + "\n");
+      publishLog(buildId, step.value);
       step = await gen.next();
     }
 
@@ -87,15 +104,21 @@ async function processBuild(job: Job<{ buildId: string }>): Promise<void> {
         finishedAt: new Date(),
       },
     });
-    log.write(`==> SUCCESS (${(size / 1024 / 1024).toFixed(1)} MB)\n`);
+    const successLine = `==> SUCCESS (${(size / 1024 / 1024).toFixed(1)} MB)`;
+    log.write(successLine + "\n");
+    publishLog(buildId, successLine);
+    publishDone(buildId, "success");
     console.log(`[${buildId}] success: ${artifactPath}`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    log.write(`==> FAILED: ${message}\n`);
+    const failedLine = `==> FAILED: ${message}`;
+    log.write(failedLine + "\n");
+    publishLog(buildId, failedLine);
     await db().build.update({
       where: { id: buildId },
       data: { status: "failed", error: message.slice(0, 2000), finishedAt: new Date() },
     });
+    publishDone(buildId, "failed");
     console.error(`[${buildId}] failed: ${message}`);
   } finally {
     log.end();

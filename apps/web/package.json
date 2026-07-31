@@ -10,6 +10,7 @@
   "dependencies": {
     "@mybuild/db": "workspace:*",
     "bullmq": "^5.34.0",
+    "ioredis": "^5.4.1",
     "next": "^15.3.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"

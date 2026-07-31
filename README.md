@@ -101,4 +101,4 @@ packages/cli/          build-cli (login / init / build)
 
 - No `pnpm-lock.yaml` is committed yet; images run `pnpm install` against the version ranges in the package manifests. After your first successful image build you can generate and commit a lockfile for reproducibility.
 - Concurrency is fixed at 1 build at a time on purpose.
-- Phase 1 (live log streaming via SSE, log view, cancel) and Phase 2 (signing) are not built yet; the worker already writes the full build log to the `artifacts` volume (`build.log` next to each artifact).
+- Live log streaming (SSE) and a per-build log console + progress bar are in — click "view" next to any build on the dashboard. Cancel button and Phase 2 (signing) are not built yet; the worker still writes the full build log to the `artifacts` volume (`build.log` next to each artifact) regardless.
