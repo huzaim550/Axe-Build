@@ -24,6 +24,7 @@ model Build {
   platform     String    @default("android")
   buildType    String    @default("apk") // apk | aab
   profile      String    @default("release") // release | debug
+  abi          String    @default("arm64-v8a") // comma-separated ABI list to compile
   tarballPath  String // path on the uploads volume
   artifactPath String? // path on the artifacts volume
   logPath      String? // full log file on the artifacts volume

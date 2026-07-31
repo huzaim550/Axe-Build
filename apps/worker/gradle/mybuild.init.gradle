@@ -1,0 +1,18 @@
+// Applied to every build via $GRADLE_USER_HOME/init.d/ — never touches uploaded
+// project files.
+//
+// Android lint runs automatically on release builds and costs ~150s across a
+// typical Expo module graph (a lintVital* task per module; react-native-safe-area-context
+// alone took 41s in a reference EAS build). Lint findings inside third-party
+// node_modules are not actionable here, so the entire phase is wasted time.
+//
+// Tasks are disabled by name rather than through the `android.lint` DSL so this
+// works regardless of Android Gradle Plugin version. Disabled tasks are reported
+// as SKIPPED and their dependents still run normally.
+allprojects { project ->
+    project.tasks.configureEach { task ->
+        if (task.name.startsWith("lintVital")) {
+            task.enabled = false
+        }
+    }
+}

@@ -9,7 +9,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       openjdk-17-jdk-headless \
-      wget unzip git ca-certificates \
+      wget unzip git ca-certificates ccache \
     && rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g pnpm@9
@@ -18,7 +18,7 @@ RUN npm install -g pnpm@9
 # uses the same user, so the shared volumes (db-data, artifacts, ...) end up
 # writable by both containers regardless of which one initializes them first.
 # The SDK is node-owned so Gradle/AGP can auto-install missing SDK components.
-RUN mkdir -p /opt/android-sdk /workspaces /cache/gradle /cache/npm \
+RUN mkdir -p /opt/android-sdk /workspaces /cache/gradle /cache/npm /cache/ccache \
              /data/uploads /data/artifacts /data/db /repo \
     && chown -R node:node /opt/android-sdk /workspaces /cache /data /repo
 

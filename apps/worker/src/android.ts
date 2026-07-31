@@ -31,10 +31,13 @@ export class AndroidRunner implements Runner {
 
     yield `==> Installing dependencies (npm)`;
     const hasLockfile = await exists(path.join(projectDir, "package-lock.json"));
-    yield* execStream("npm", [hasLockfile ? "ci" : "install", "--no-audit", "--no-fund"], {
-      cwd: projectDir,
-      timeoutMs: remaining(),
-    });
+    // --prefer-offline: trust the persistent npm cache volume instead of
+    // revalidating every package over the network on each build.
+    yield* execStream(
+      "npm",
+      [hasLockfile ? "ci" : "install", "--no-audit", "--no-fund", "--prefer-offline"],
+      { cwd: projectDir, timeoutMs: remaining() },
+    );
 
     yield `==> Generating android project (expo prebuild)`;
     yield* execStream(
@@ -50,11 +53,14 @@ export class AndroidRunner implements Runner {
     const task = GRADLE_TASKS[`${spec.buildType}/${spec.profile}`];
     if (!task) throw new Error(`Unsupported build: ${spec.buildType}/${spec.profile}`);
 
-    yield `==> Running Gradle: ${task}`;
-    yield* execStream("./gradlew", [task, "--no-daemon", "--stacktrace"], {
-      cwd: androidDir,
-      timeoutMs: remaining(),
-    });
+    yield `==> Running Gradle: ${task} (abis: ${spec.abis})`;
+    // -P overrides the reactNativeArchitectures set in the generated
+    // gradle.properties, so we narrow the ABI list without editing user files.
+    yield* execStream(
+      "./gradlew",
+      [task, `-PreactNativeArchitectures=${spec.abis}`, "--no-daemon", "--stacktrace"],
+      { cwd: androidDir, timeoutMs: remaining() },
+    );
 
     const ext = spec.buildType === "aab" ? ".aab" : ".apk";
     const outputsDir = path.join(androidDir, "app", "build", "outputs");

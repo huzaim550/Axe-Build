@@ -24,5 +24,6 @@ nuke:
 # artifacts are untouched. Containers must be stopped to release the volumes.
 clean-cache:
 	$(COMPOSE) down --remove-orphans
-	$(DOCKER) volume rm -f mybuild_gradle-cache mybuild_npm-cache
+	$(DOCKER) volume rm -f mybuild_gradle-cache mybuild_npm-cache mybuild_ccache
 	@echo "Caches cleared. Run 'make up' to start again."
+	@echo "Note: the next build will be slow again while these refill."

@@ -32,12 +32,19 @@ export function getBuild(cfg: GlobalConfig, id: string) {
 
 export async function uploadBuild(
   cfg: GlobalConfig,
-  opts: { projectSlug: string; buildType: string; profile: string; tarball: Buffer },
+  opts: {
+    projectSlug: string;
+    buildType: string;
+    profile: string;
+    abi: string;
+    tarball: Buffer;
+  },
 ): Promise<{ buildId: string }> {
   const form = new FormData();
   form.set("projectSlug", opts.projectSlug);
   form.set("buildType", opts.buildType);
   form.set("profile", opts.profile);
+  form.set("abi", opts.abi);
   form.set("tarball", new Blob([new Uint8Array(opts.tarball)]), "project.tgz");
   return request(cfg, "/api/builds", { method: "POST", body: form });
 }

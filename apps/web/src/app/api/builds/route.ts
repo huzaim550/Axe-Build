@@ -7,6 +7,15 @@ import { buildQueue } from "@/lib/queue";
 const UPLOADS_DIR = process.env.UPLOADS_DIR ?? "/data/uploads";
 const MAX_TARBALL_BYTES = 200 * 1024 * 1024;
 
+// Every extra ABI means compiling the whole native (C++) module graph again, so
+// the default is the one architecture essentially every modern phone uses.
+const ALL_ABIS = "armeabi-v7a,arm64-v8a,x86,x86_64";
+const ABI_PRESETS: Record<string, string> = {
+  "arm64-v8a": "arm64-v8a",
+  "arm64-v8a,armeabi-v7a": "arm64-v8a,armeabi-v7a",
+  all: ALL_ABIS,
+};
+
 export async function GET(req: Request) {
   if (!isAuthorized(req)) return unauthorized();
   const builds = await db().build.findMany({
@@ -26,6 +35,7 @@ export async function POST(req: Request) {
   const projectSlug = String(form.get("projectSlug") ?? "");
   const buildType = String(form.get("buildType") ?? "apk");
   const profile = String(form.get("profile") ?? "release");
+  const abiInput = String(form.get("abi") ?? "arm64-v8a");
   const tarball = form.get("tarball");
 
   if (!["apk", "aab"].includes(buildType)) {
@@ -33,6 +43,13 @@ export async function POST(req: Request) {
   }
   if (!["release", "debug"].includes(profile)) {
     return Response.json({ error: "profile must be release or debug" }, { status: 400 });
+  }
+  const abi = ABI_PRESETS[abiInput];
+  if (!abi) {
+    return Response.json(
+      { error: `abi must be one of: ${Object.keys(ABI_PRESETS).join(", ")}` },
+      { status: 400 },
+    );
   }
   if (!(tarball instanceof File)) {
     return Response.json({ error: "tarball file is required" }, { status: 400 });
@@ -52,6 +69,7 @@ export async function POST(req: Request) {
       status: "queued",
       buildType,
       profile,
+      abi,
       tarballPath: "", // set below once the id names the file
     },
   });

@@ -53,7 +53,12 @@ program
   .description("Tar the project source, upload it, and wait for the build to finish")
   .option("--type <type>", "apk | aab", "apk")
   .option("--profile <profile>", "release | debug", "release")
-  .action(async (opts: { type: string; profile: string }) => {
+  .option(
+    "--abi <abi>",
+    "arm64-v8a | arm64-v8a,armeabi-v7a | all — fewer ABIs build much faster",
+    "arm64-v8a",
+  )
+  .action(async (opts: { type: string; profile: string; abi: string }) => {
     const cfg = loadGlobalConfig();
     const cwd = process.cwd();
     const { projectSlug } = loadProjectConfig(cwd);
@@ -69,6 +74,7 @@ program
       projectSlug,
       buildType: opts.type,
       profile: opts.profile,
+      abi: opts.abi,
       tarball,
     });
     await fs.rm(path.dirname(tarPath), { recursive: true, force: true });

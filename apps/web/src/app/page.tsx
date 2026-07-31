@@ -90,6 +90,7 @@ export default async function Home() {
                 </td>
                 <td style={td}>
                   {b.buildType} / {b.profile}
+                  <div style={{ color: "#565c66", fontSize: 12 }}>{b.abi}</div>
                 </td>
                 <td style={td}>{fmtDuration(b.startedAt, b.finishedAt)}</td>
                 <td style={td}>{fmtBytes(b.sizeBytes)}</td>

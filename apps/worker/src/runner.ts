@@ -4,6 +4,8 @@ export interface BuildSpec {
   tarballPath: string;
   buildType: "apk" | "aab";
   profile: "release" | "debug";
+  /** Comma-separated ABI list, e.g. "arm64-v8a". Fewer ABIs = far less C++ to compile. */
+  abis: string;
   /** Fresh, empty directory the runner may do anything in. Deleted afterwards. */
   workspaceDir: string;
   /** Absolute deadline for the whole build. */

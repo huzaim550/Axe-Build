@@ -22,7 +22,7 @@ Web ─┘        │                                (Android SDK + JDK17 + Grad
 - No Docker-in-Docker, no `privileged`, no docker socket mounts.
 - Worker is hard-capped at **8 GB RAM / 3 CPUs** (`docker-compose.yml`) and Gradle's JVM at 3 GB, so a runaway build cannot freeze the host.
 - Every build runs in a fresh workspace directory that is **always deleted afterwards**, success or failure.
-- All mutable state is in named volumes: `redis-data`, `db-data`, `uploads`, `artifacts`, `workspaces`, `gradle-cache`, `npm-cache`.
+- All mutable state is in named volumes: `redis-data`, `db-data`, `uploads`, `artifacts`, `workspaces`, `gradle-cache`, `npm-cache`, `ccache`.
 
 ## Requirements (server machine)
 
@@ -62,7 +62,14 @@ build-cli build --type apk --profile release
 
 The CLI tars only your source (excludes `node_modules`, `.git`, `android/`, `ios/`, `.expo`), uploads it, and polls until the build finishes. The first build downloads all npm + Gradle dependencies and takes a long time (20–40 min on modest hardware); later builds reuse the `gradle-cache`/`npm-cache` volumes and are much faster.
 
-Output types: `--type apk|aab`, `--profile release|debug`. Phase 0 builds are **unsigned-release/debug-keystore** APKs — fine for sideloading and testing. Keystore signing is Phase 2.
+Output types: `--type apk|aab`, `--profile release|debug`, `--abi arm64-v8a|all`. Phase 0 builds are **unsigned-release/debug-keystore** APKs — fine for sideloading and testing. Keystore signing is Phase 2.
+
+### Build speed
+
+Builds target only `arm64-v8a` by default and skip Android lint, and the worker uses `ccache` so
+repeat native compilation is nearly free. A first build of a project takes ~20–30 min; later builds
+of the same project land around 8–15 min. Pass `--abi all` when you need an APK that also runs on
+x86 emulators or 32-bit phones, at the cost of a much longer build.
 
 ## API (all requests need `Authorization: Bearer $LOCAL_TOKEN`)
 

@@ -69,7 +69,14 @@ services:
       # Gradle build JVM stays well inside the container's 9g budget
       # (written to $GRADLE_USER_HOME/gradle.properties by the entrypoint).
       GRADLE_JVM_ARGS: "-Xmx4g -XX:MaxMetaspaceSize=1g"
-      BUILD_TIMEOUT_MS: "3600000"
+      # ccache makes repeat native (C++) compilation nearly free. Same mechanism
+      # EAS uses; the cache persists in its own volume across builds.
+      ANDROID_CCACHE: /usr/bin/ccache
+      CCACHE_DIR: /cache/ccache
+      CCACHE_MAXSIZE: 5G
+      # 2h. A cold first build downloads every npm + Maven dependency over the
+      # home connection; killing it mid-Gradle just wastes the work done so far.
+      BUILD_TIMEOUT_MS: "7200000"
       CI: "1"
       EXPO_NO_TELEMETRY: "1"
     volumes:
@@ -79,6 +86,7 @@ services:
       - workspaces:/workspaces
       - gradle-cache:/cache/gradle
       - npm-cache:/cache/npm
+      - ccache:/cache/ccache
 
 volumes:
   redis-data:
@@ -88,3 +96,4 @@ volumes:
   workspaces:
   gradle-cache:
   npm-cache:
+  ccache:

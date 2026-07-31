@@ -81,6 +81,20 @@ Options:
 |---|---|---|---|
 | `--type` | `apk`, `aab` | `apk` | `aab` is for Play Store upload; `apk` is for sideloading/testing |
 | `--profile` | `release`, `debug` | `release` | debug builds are faster but larger/unoptimized |
+| `--abi` | `arm64-v8a`, `arm64-v8a,armeabi-v7a`, `all` | `arm64-v8a` | see below — this is the biggest speed lever |
+
+### About `--abi`
+
+Every extra CPU architecture means compiling the app's entire C++ module graph again, so the
+default builds only `arm64-v8a` — the architecture essentially every Android phone from ~2019
+onward uses. That alone cuts native compilation to roughly a quarter.
+
+Use `--abi all` when you need a universal APK, specifically:
+
+- running on an **x86/x86_64 Android emulator**, or
+- installing on a **very old 32-bit-only phone**.
+
+Those builds take considerably longer.
 
 ## 4. Install the APK on your phone
 
@@ -92,12 +106,19 @@ signing (Phase 2) is added.
 
 ## Timing expectations
 
-- **First build ever** for a project: slow (10–30+ min) — it's doing a full `npm ci` and a
-  cold Gradle build with nothing cached yet.
-- **Every build after that**: much faster, because `gradle-cache` and `npm-cache` persist
-  on the server between builds.
+- **First build ever** for a project: ~20–30 min. It downloads every npm and Maven dependency
+  over your home connection and compiles all native code from scratch, with nothing cached.
+- **Every build after that**: roughly **8–15 min**. Three separate caches make this happen and
+  they all persist on the server between builds:
+  - `npm-cache` — dependencies aren't re-downloaded
+  - `gradle-cache` — Maven artifacts plus Gradle's build cache for Kotlin/Java tasks
+  - `ccache` — compiled C++ is reused, so native modules barely rebuild at all
 - Only **one build runs at a time** by design (the hardware can't handle more) — if you
   queue a second build while one is running, it just waits.
+- The build is capped at **2 hours** before being killed as stuck.
+
+If a build ever feels inexplicably slow, check whether the caches were recently wiped
+(`make clean-cache` empties all three, making the next build behave like a first build).
 
 ## If something goes wrong
 

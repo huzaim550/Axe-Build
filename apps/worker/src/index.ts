@@ -77,6 +77,7 @@ async function processBuild(job: Job<{ buildId: string }>): Promise<void> {
       tarballPath: build.tarballPath,
       buildType: build.buildType === "aab" ? "aab" : "apk",
       profile: build.profile === "debug" ? "debug" : "release",
+      abis: build.abi || "arm64-v8a",
       workspaceDir,
       deadline: Date.now() + BUILD_TIMEOUT_MS,
     };
