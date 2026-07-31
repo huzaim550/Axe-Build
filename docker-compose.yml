@@ -52,8 +52,11 @@ services:
       - redis
       - web
     # Hard caps: a runaway Gradle build can never take down the host.
-    mem_limit: 8g
-    memswap_limit: 8g
+    # Sized for a 4-core/15GB server: leave 1 full core + ~5-6GB free for the
+    # OS, redis, web, and anything else running there. Adjust to your actual
+    # hardware — never raise cpus to the host's full core count.
+    mem_limit: 9g
+    memswap_limit: 9g
     cpus: 3
     environment:
       DATABASE_URL: "file:/data/db/mybuild.db"
@@ -63,9 +66,9 @@ services:
       WORKSPACES_DIR: /workspaces
       GRADLE_USER_HOME: /cache/gradle
       npm_config_cache: /cache/npm
-      # Gradle build JVM stays well inside the container's 8g budget
+      # Gradle build JVM stays well inside the container's 9g budget
       # (written to $GRADLE_USER_HOME/gradle.properties by the entrypoint).
-      GRADLE_JVM_ARGS: "-Xmx3g -XX:MaxMetaspaceSize=1g"
+      GRADLE_JVM_ARGS: "-Xmx4g -XX:MaxMetaspaceSize=1g"
       BUILD_TIMEOUT_MS: "3600000"
       CI: "1"
       EXPO_NO_TELEMETRY: "1"

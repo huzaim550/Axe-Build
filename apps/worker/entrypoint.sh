@@ -9,6 +9,8 @@ mkdir -p "$GRADLE_USER_HOME"
 cat > "$GRADLE_USER_HOME/gradle.properties" <<EOF
 org.gradle.jvmargs=${GRADLE_JVM_ARGS:--Xmx3g -XX:MaxMetaspaceSize=1g}
 org.gradle.daemon=false
+org.gradle.parallel=true
+org.gradle.caching=true
 EOF
 
 exec node /repo/apps/worker/dist/index.js
