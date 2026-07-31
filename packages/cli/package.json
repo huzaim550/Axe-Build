@@ -1,0 +1,22 @@
+{
+  "name": "@mybuild/cli",
+  "version": "0.1.0",
+  "private": true,
+  "bin": {
+    "build-cli": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "commander": "^13.0.0",
+    "tar": "^7.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}

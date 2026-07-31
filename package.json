@@ -1,0 +1,10 @@
+{
+  "name": "mybuild",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Self-hosted, localhost-only, Android-only Expo build service (EAS clone). Everything runs in Docker.",
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=20"
+  }
+}

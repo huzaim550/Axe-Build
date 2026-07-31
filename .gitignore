@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.next/
+.env
+*.tsbuildinfo
+*.tgz
+*.log
+.DS_Store
+
+# local sqlite files if ever created outside the volume
+*.db
+*.db-journal
+
+# keystores must never be committed (Phase 2)
+*.jks
+*.keystore

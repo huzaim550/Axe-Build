@@ -1,0 +1,47 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Project {
+  id        String    @id @default(cuid())
+  name      String
+  slug      String    @unique // used by the CLI to target this project
+  createdAt DateTime  @default(now())
+  builds    Build[]
+  keystore  Keystore?
+}
+
+model Build {
+  id           String    @id @default(cuid())
+  projectId    String
+  project      Project   @relation(fields: [projectId], references: [id])
+  status       String // queued | running | success | failed | canceled
+  platform     String    @default("android")
+  buildType    String    @default("apk") // apk | aab
+  profile      String    @default("release") // release | debug
+  tarballPath  String // path on the uploads volume
+  artifactPath String? // path on the artifacts volume
+  logPath      String? // full log file on the artifacts volume
+  sizeBytes    Int?
+  error        String?
+  createdAt    DateTime  @default(now())
+  startedAt    DateTime?
+  finishedAt   DateTime?
+}
+
+// Phase 2 — present in the schema so the DB never needs a breaking migration,
+// but no code touches it in Phase 0.
+model Keystore {
+  id            String  @id @default(cuid())
+  projectId     String  @unique
+  project       Project @relation(fields: [projectId], references: [id])
+  path          String // .jks/.keystore file on a volume
+  keyAlias      String
+  storePassword String // plaintext acceptable for localhost-only; MUST stay out of git & logs
+  keyPassword   String
+}

@@ -1,0 +1,87 @@
+# Self-hosted Expo Android build service — localhost only, fully containerized.
+#
+# Machine safety:
+#   - No privileged mode, no docker socket mount, no Docker-in-Docker.
+#   - All mutable state lives in the named volumes below.
+#   - Worker has hard memory/cpu limits so a runaway Gradle cannot freeze the host.
+#   - `docker compose down -v --remove-orphans` removes everything and leaves the host pristine.
+#
+# Works with `docker compose` and `podman compose` alike.
+
+name: mybuild
+
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    image: mybuild-web
+    restart: unless-stopped
+    depends_on:
+      - redis
+    # Reachable from the home LAN (0.0.0.0). Do NOT port-forward 3000 on your
+    # router — NAT is what keeps this home-only. Set BIND_ADDR=127.0.0.1 to
+    # restrict it to the server machine itself.
+    ports:
+      - "${BIND_ADDR:-0.0.0.0}:3000:3000"
+    environment:
+      DATABASE_URL: "file:/data/db/mybuild.db"
+      REDIS_URL: "redis://redis:6379"
+      LOCAL_TOKEN: "${LOCAL_TOKEN:-dev-local-token}"
+      UPLOADS_DIR: /data/uploads
+      ARTIFACTS_DIR: /data/artifacts
+    volumes:
+      - db-data:/data/db
+      - uploads:/data/uploads
+      - artifacts:/data/artifacts:ro
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    image: mybuild-worker
+    restart: unless-stopped
+    depends_on:
+      - redis
+      - web
+    # Hard caps: a runaway Gradle build can never take down the host.
+    mem_limit: 8g
+    memswap_limit: 8g
+    cpus: 3
+    environment:
+      DATABASE_URL: "file:/data/db/mybuild.db"
+      REDIS_URL: "redis://redis:6379"
+      UPLOADS_DIR: /data/uploads
+      ARTIFACTS_DIR: /data/artifacts
+      WORKSPACES_DIR: /workspaces
+      GRADLE_USER_HOME: /cache/gradle
+      npm_config_cache: /cache/npm
+      # Gradle build JVM stays well inside the container's 8g budget
+      # (written to $GRADLE_USER_HOME/gradle.properties by the entrypoint).
+      GRADLE_JVM_ARGS: "-Xmx3g -XX:MaxMetaspaceSize=1g"
+      BUILD_TIMEOUT_MS: "3600000"
+      CI: "1"
+      EXPO_NO_TELEMETRY: "1"
+    volumes:
+      - db-data:/data/db
+      - uploads:/data/uploads:ro
+      - artifacts:/data/artifacts
+      - workspaces:/workspaces
+      - gradle-cache:/cache/gradle
+      - npm-cache:/cache/npm
+
+volumes:
+  redis-data:
+  db-data:
+  uploads:
+  artifacts:
+  workspaces:
+  gradle-cache:
+  npm-cache:
