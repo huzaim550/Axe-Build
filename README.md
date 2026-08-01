@@ -4,7 +4,7 @@ A local, open-source mini-clone of Expo Application Services (EAS):
 
 - **Android only.** iOS is out of scope (needs macOS/Xcode).
 - **Home network only.** Single server, single user, one hardcoded token. The dashboard listens on port 3000 for your LAN — never port-forward it on your router. (Set `BIND_ADDR=127.0.0.1` to restrict it to the server machine itself.)
-- **Fully containerized.** The host needs **only Docker** (or Podman). Android SDK, JDK 17, Node, Gradle — all live inside images. All state lives in named volumes. `docker compose down -v` leaves the machine exactly as it was.
+- **Fully containerized.** The host needs **only Docker** (or Podman). Android SDK, JDK 17, Node, Gradle — all live inside containers and named volumes, never on the host. `docker compose down -v` leaves the machine exactly as it was.
 
 You run a small CLI inside an Expo project; it uploads the source (no `node_modules`) to the server; a worker container runs `npm ci` → `expo prebuild` → Gradle and gives you a downloadable APK/AAB.
 
@@ -20,14 +20,20 @@ Web ─┘        │                                (Android SDK + JDK17 + Grad
 ## Machine safety
 
 - No Docker-in-Docker, no `privileged`, no docker socket mounts.
-- Worker is hard-capped at **8 GB RAM / 3 CPUs** (`docker-compose.yml`) and Gradle's JVM at 3 GB, so a runaway build cannot freeze the host.
+- Worker is hard-capped at **9 GB RAM / 3 CPUs** (`docker-compose.yml`) and Gradle's JVM at 4 GB, so a runaway build cannot freeze the host.
 - Every build runs in a fresh workspace directory that is **always deleted afterwards**, success or failure.
-- All mutable state is in named volumes: `redis-data`, `db-data`, `uploads`, `artifacts`, `workspaces`, `gradle-cache`, `npm-cache`, `ccache`.
+- All mutable state is in named volumes: `redis-data`, `db-data`, `uploads`, `artifacts`, `workspaces`, `android-sdk`, `gradle-cache`, `npm-cache`, `ccache`.
+
+## The Android SDK lives on a volume, not in the image
+
+The worker image ships Node + JDK 17 only. The Android SDK/NDK is downloaded **once**, by `apps/worker/entrypoint.sh`, into the `android-sdk` volume. The first `make up` therefore takes several minutes with the worker logging `==> Installing Android SDK packages`; every start after that is instant, and rebuilding the image never re-downloads it.
+
+Change the package set with `ANDROID_SDK_PACKAGES` in `docker-compose.yml` — `sdkmanager` is idempotent, so the next start pulls only what's missing. `make nuke` keeps this volume on purpose; `make nuke-sdk` drops it.
 
 ## Requirements (server machine)
 
 - Docker Engine + Compose plugin, **or** Podman with a compose provider (`make up DOCKER=podman`).
-- ~15 GB free disk for the worker image (Android SDK + NDK) plus caches. 8 GB+ RAM recommended for release builds.
+- ~15 GB free disk for the Android SDK + NDK volume plus caches. 8 GB+ RAM recommended for release builds.
 
 ## Run the server
 
@@ -36,8 +42,8 @@ Web ─┘        │                                (Android SDK + JDK17 + Grad
 export LOCAL_TOKEN=$(openssl rand -hex 16)
 
 make up          # builds images + starts redis, web, worker
-                 # first build takes a while: it downloads the Android SDK/NDK
-make logs        # follow logs
+make logs        # follow logs — the FIRST start downloads the Android SDK/NDK
+                 # into the android-sdk volume (several minutes, one time only)
 ```
 
 Dashboard: `http://<server-ip>:3000` from any machine at home (or <http://localhost:3000> on the server itself).
@@ -71,35 +77,53 @@ repeat native compilation is nearly free. A first build of a project takes ~20�
 of the same project land around 8–15 min. Pass `--abi all` when you need an APK that also runs on
 x86 emulators or 32-bit phones, at the cost of a much longer build.
 
-## API (all requests need `Authorization: Bearer $LOCAL_TOKEN`)
+## Updates
+
+Installed apps can be updated two ways: an **OTA update** (JS/assets only, self-hosted
+[expo-updates](https://docs.expo.dev/technical-specs/expo-updates-1/), ~90 s and no Gradle at all) or a
+new **APK** via a stable "latest" endpoint. Builds are never live until you promote them with
+`build-cli release <buildId>`. Full walkthrough in [GUIDE.md](GUIDE.md#5-shipping-updates-to-phones-that-already-have-the-app).
+
+## API (token required unless marked public)
 
 | Route | What |
 |---|---|
 | `POST /api/projects` | `{ name }` → `{ id, slug }` |
 | `GET /api/projects` | list projects |
-| `POST /api/builds` | multipart: `projectSlug`, `buildType`, `profile`, file `tarball` → `{ buildId }` |
+| `POST /api/builds` | multipart: `projectSlug`, `buildType`, `profile`, `abi`, `ota`, file `tarball` → `{ buildId }` |
 | `GET /api/builds/:id` | build status + metadata |
 | `GET /api/builds/:id/artifact` | download APK/AAB (also accepts `?token=`) |
-| `GET /api/health` | liveness (no auth) |
+| `POST /api/builds/:id/release` | `{ apk?, update? }` — promote/retire a build |
+| `GET /api/updates/:slug/manifest` | **public** — Expo Updates protocol v1 manifest |
+| `GET /api/updates/:slug/assets` | **public** — one file from a released update bundle |
+| `GET /api/apps/:slug/latest` | **public** — current released APK version + download URL |
+| `GET /api/apps/:slug/latest/download` | **public** — that APK |
+| `GET /api/health` | **public** — liveness |
+
+The four update routes are unauthenticated because an app installed on a phone cannot carry
+`LOCAL_TOKEN`, and embedding it in a published APK would be worse. They are read-only; everything
+that changes state still needs the token. One more reason not to port-forward 3000.
 
 ## Housekeeping
 
 ```bash
 make down          # stop containers, keep volumes (builds/caches survive)
 make clean-cache   # wipe ONLY gradle+npm caches when disk gets tight
-make nuke          # containers + ALL volumes + images gone → host pristine
+make nuke          # containers + images + state volumes gone, SDK volume kept
+make nuke-sdk      # same, but drop the Android SDK too → host fully pristine
 ```
 
-`make nuke` (or `docker compose down -v --remove-orphans` + removing the two images) is the full teardown: nothing remains on the machine except this source tree.
+`make nuke` deliberately keeps the `android-sdk` volume so the next `make up` doesn't re-download several GB over your home connection. `make nuke-sdk` is the true full teardown: nothing remains on the machine except this source tree.
 
 ## Repo layout
 
 ```
 docker-compose.yml     redis + web + worker, named volumes, resource limits
-Makefile               up / down / logs / nuke / clean-cache
-scripts/nuke.sh        full teardown
+Makefile               up / down / logs / nuke / nuke-sdk / clean-cache
+scripts/nuke.sh        full teardown (keeps android-sdk unless --sdk)
 apps/web/              Next.js dashboard + API routes (+ Dockerfile)
-apps/worker/           BullMQ consumer + Android build runner (+ heavy Dockerfile)
+apps/worker/           BullMQ consumer + Android build runner (+ Dockerfile,
+                       entrypoint.sh bootstraps the SDK volume)
 packages/db/           Prisma schema + shared client (SQLite on db-data volume)
 packages/cli/          build-cli (login / init / build)
 ```

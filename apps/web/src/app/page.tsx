@@ -66,6 +66,7 @@ export default async function Home() {
               <th style={th}>Project</th>
               <th style={th}>Status</th>
               <th style={th}>Type</th>
+              <th style={th}>Version</th>
               <th style={th}>Duration</th>
               <th style={th}>Size</th>
               <th style={th}>Started</th>
@@ -90,7 +91,21 @@ export default async function Home() {
                 </td>
                 <td style={td}>
                   {b.buildType} / {b.profile}
-                  <div style={{ color: "#565c66", fontSize: 12 }}>{b.abi}</div>
+                  <div style={{ color: "#565c66", fontSize: 12 }}>
+                    {b.buildType === "update" ? "OTA only" : b.abi}
+                  </div>
+                </td>
+                <td style={td}>
+                  {b.versionName ? `${b.versionName} (${b.versionCode ?? "?"})` : "—"}
+                  {(b.releasedApk || b.releasedUpdate) && (
+                    <div style={{ color: "#22c55e", fontSize: 12 }}>
+                      ● live{b.releasedApk && b.releasedUpdate
+                        ? " APK+OTA"
+                        : b.releasedApk
+                          ? " APK"
+                          : " OTA"}
+                    </div>
+                  )}
                 </td>
                 <td style={td}>{fmtDuration(b.startedAt, b.finishedAt)}</td>
                 <td style={td}>{fmtBytes(b.sizeBytes)}</td>

@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
@@ -6,6 +7,7 @@ import Redis from "ioredis";
 import { db } from "@mybuild/db";
 import { AndroidRunner } from "./android.js";
 import type { BuildSpec } from "./runner.js";
+import { writeUpdateManifest } from "./updates.js";
 
 const WORKSPACES_DIR = process.env.WORKSPACES_DIR ?? "/workspaces";
 const ARTIFACTS_DIR = process.env.ARTIFACTS_DIR ?? "/data/artifacts";
@@ -75,9 +77,11 @@ async function processBuild(job: Job<{ buildId: string }>): Promise<void> {
     const spec: BuildSpec = {
       buildId,
       tarballPath: build.tarballPath,
-      buildType: build.buildType === "aab" ? "aab" : "apk",
+      buildType:
+        build.buildType === "aab" ? "aab" : build.buildType === "update" ? "update" : "apk",
       profile: build.profile === "debug" ? "debug" : "release",
       abis: build.abi || "arm64-v8a",
+      ota: build.ota,
       workspaceDir,
       deadline: Date.now() + BUILD_TIMEOUT_MS,
     };
@@ -90,11 +94,30 @@ async function processBuild(job: Job<{ buildId: string }>): Promise<void> {
       publishLog(buildId, step.value);
       step = await gen.next();
     }
+    const result = step.value;
 
-    const src = step.value.artifactSourcePath;
-    const artifactPath = path.join(buildArtifactsDir, path.basename(src));
-    await fsp.copyFile(src, artifactPath);
-    const { size } = await fsp.stat(artifactPath);
+    // An OTA-only build has no APK, so artifact fields stay null.
+    let artifactPath: string | undefined;
+    let size: number | undefined;
+    if (result.artifactSourcePath) {
+      artifactPath = path.join(buildArtifactsDir, path.basename(result.artifactSourcePath));
+      await fsp.copyFile(result.artifactSourcePath, artifactPath);
+      size = (await fsp.stat(artifactPath)).size;
+    }
+
+    // The update bundle must outlive the workspace (deleted in `finally`), so
+    // it moves onto the artifacts volume next to the APK and the log.
+    let updateDirPath: string | undefined;
+    let updateUuid: string | undefined;
+    if (result.updateSourceDir) {
+      updateDirPath = path.join(buildArtifactsDir, "update");
+      await fsp.cp(result.updateSourceDir, updateDirPath, { recursive: true });
+      // Hash every file now: the web container mounts artifacts read-only and
+      // must not re-hash the bundle on each manifest poll.
+      await writeUpdateManifest(updateDirPath);
+      // Expo manifests require a UUID `id`; cuid would be rejected by the client.
+      updateUuid = crypto.randomUUID();
+    }
 
     await db().build.update({
       where: { id: buildId },
@@ -102,14 +125,22 @@ async function processBuild(job: Job<{ buildId: string }>): Promise<void> {
         status: "success",
         artifactPath,
         sizeBytes: size,
+        updateDirPath,
+        updateUuid,
+        versionName: result.meta.versionName,
+        versionCode: result.meta.versionCode,
+        androidPackage: result.meta.androidPackage,
+        runtimeVersion: result.meta.runtimeVersion,
         finishedAt: new Date(),
       },
     });
-    const successLine = `==> SUCCESS (${(size / 1024 / 1024).toFixed(1)} MB)`;
+    const successLine = size
+      ? `==> SUCCESS (${(size / 1024 / 1024).toFixed(1)} MB)`
+      : `==> SUCCESS (update bundle only)`;
     log.write(successLine + "\n");
     publishLog(buildId, successLine);
     publishDone(buildId, "success");
-    console.log(`[${buildId}] success: ${artifactPath}`);
+    console.log(`[${buildId}] success: ${artifactPath ?? updateDirPath}`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const failedLine = `==> FAILED: ${message}`;

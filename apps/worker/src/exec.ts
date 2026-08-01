@@ -1,6 +1,55 @@
 import { spawn } from "node:child_process";
 import readline from "node:readline";
 
+/**
+ * Run a command and return its stdout. Unlike execStream this buffers, so it is
+ * only for small, quick commands (`expo config --json`) — never Gradle.
+ * stderr is dropped: the tools we call here chatter on it even on success.
+ */
+export function execCapture(
+  command: string,
+  args: string[],
+  opts: ExecOptions,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: opts.cwd,
+      env: { ...process.env, ...opts.env },
+      detached: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let stdout = "";
+    let stderrTail = "";
+    child.stdout!.on("data", (c) => {
+      stdout += c;
+    });
+    child.stderr!.on("data", (c) => {
+      stderrTail = (stderrTail + c).slice(-2000);
+    });
+
+    const timer = opts.timeoutMs
+      ? setTimeout(() => {
+          try {
+            process.kill(-child.pid!, "SIGKILL");
+          } catch {
+            /* already gone */
+          }
+        }, opts.timeoutMs)
+      : undefined;
+
+    child.on("error", (err) => {
+      if (timer) clearTimeout(timer);
+      reject(err);
+    });
+    child.on("close", (code) => {
+      if (timer) clearTimeout(timer);
+      if (code === 0) resolve(stdout);
+      else reject(new Error(`Command failed (exit ${code}): ${command} ${args.join(" ")}\n${stderrTail}`));
+    });
+  });
+}
+
 export interface ExecOptions {
   cwd: string;
   env?: NodeJS.ProcessEnv;

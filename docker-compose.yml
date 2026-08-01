@@ -66,6 +66,10 @@ services:
       WORKSPACES_DIR: /workspaces
       GRADLE_USER_HOME: /cache/gradle
       npm_config_cache: /cache/npm
+      # Downloaded once into the android-sdk volume by the worker entrypoint,
+      # never baked into the image. Edit this to add SDK packages: the next
+      # start pulls only what's missing.
+      ANDROID_SDK_PACKAGES: "platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.1.12297006 cmake;3.22.1"
       # Gradle build JVM stays well inside the container's 9g budget
       # (written to $GRADLE_USER_HOME/gradle.properties by the entrypoint).
       GRADLE_JVM_ARGS: "-Xmx4g -XX:MaxMetaspaceSize=1g"
@@ -84,6 +88,7 @@ services:
       - uploads:/data/uploads:ro
       - artifacts:/data/artifacts
       - workspaces:/workspaces
+      - android-sdk:/opt/android-sdk
       - gradle-cache:/cache/gradle
       - npm-cache:/cache/npm
       - ccache:/cache/ccache
@@ -94,6 +99,9 @@ volumes:
   uploads:
   artifacts:
   workspaces:
+  # The Android SDK/NDK. Survives image rebuilds and `make nuke` on purpose —
+  # it is several GB over a home connection. `make nuke-sdk` drops it.
+  android-sdk:
   gradle-cache:
   npm-cache:
   ccache:

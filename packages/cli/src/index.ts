@@ -2,7 +2,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { Command } from "commander";
-import { createProject, getBuild, uploadBuild } from "./api.js";
+import { createProject, getBuild, releaseBuild, uploadBuild } from "./api.js";
 import {
   loadGlobalConfig,
   loadProjectConfig,
@@ -51,14 +51,16 @@ program
 program
   .command("build")
   .description("Tar the project source, upload it, and wait for the build to finish")
-  .option("--type <type>", "apk | aab", "apk")
+  .option("--type <type>", "apk | aab | update (OTA-only: no Gradle, ~90s)", "apk")
   .option("--profile <profile>", "release | debug", "release")
   .option(
     "--abi <abi>",
     "arm64-v8a | arm64-v8a,armeabi-v7a | all — fewer ABIs build much faster",
     "arm64-v8a",
   )
-  .action(async (opts: { type: string; profile: string; abi: string }) => {
+  .option("--ota", "also export an OTA update bundle alongside the apk/aab")
+  .option("--release", "promote this build to the update channels once it succeeds")
+  .action(async (opts: { type: string; profile: string; abi: string; ota?: boolean; release?: boolean }) => {
     const cfg = loadGlobalConfig();
     const cwd = process.cwd();
     const { projectSlug } = loadProjectConfig(cwd);
@@ -75,6 +77,7 @@ program
       buildType: opts.type,
       profile: opts.profile,
       abi: opts.abi,
+      ota: Boolean(opts.ota),
       tarball,
     });
     await fs.rm(path.dirname(tarPath), { recursive: true, force: true });
@@ -92,10 +95,23 @@ program
       }
       if (lastStatus === "success") {
         console.log("");
-        console.log("Build succeeded! Download your artifact:");
-        console.log(`  ${cfg.url}/api/builds/${buildId}/artifact?token=${encodeURIComponent(cfg.token)}`);
-        console.log("or:");
-        console.log(`  curl -OJ -H "Authorization: Bearer ${cfg.token}" ${cfg.url}/api/builds/${buildId}/artifact`);
+        if (opts.type === "update") {
+          console.log("Update bundle built (no APK — this was an OTA-only build).");
+        } else {
+          console.log("Build succeeded! Download your artifact:");
+          console.log(`  ${cfg.url}/api/builds/${buildId}/artifact?token=${encodeURIComponent(cfg.token)}`);
+          console.log("or:");
+          console.log(`  curl -OJ -H "Authorization: Bearer ${cfg.token}" ${cfg.url}/api/builds/${buildId}/artifact`);
+        }
+
+        if (opts.release) {
+          const r = await releaseBuild(cfg, buildId);
+          console.log("");
+          console.log(`Released to '${r.channel}': ${describeRelease(r)}`);
+        } else {
+          console.log("");
+          console.log(`Not live yet. Promote it with:  build-cli release ${buildId}`);
+        }
         return;
       }
       if (lastStatus === "failed" || lastStatus === "canceled") {
@@ -110,6 +126,47 @@ program
       await new Promise((r) => setTimeout(r, 3000));
     }
   });
+
+program
+  .command("release")
+  .description("Promote a successful build so installed apps start receiving it")
+  .argument("<buildId>")
+  .option("--apk", "release only the APK (leave the current OTA bundle in place)")
+  .option("--ota", "release only the OTA bundle (leave the current APK in place)")
+  .option("--undo", "retire this build from both channels")
+  .action(async (buildId: string, opts: { apk?: boolean; ota?: boolean; undo?: boolean }) => {
+    const cfg = loadGlobalConfig();
+
+    // No flags = release whatever this build actually produced (server decides).
+    let what: { apk?: boolean; update?: boolean } = {};
+    if (opts.undo) what = { apk: false, update: false };
+    else if (opts.apk && !opts.ota) what = { apk: true, update: false };
+    else if (opts.ota && !opts.apk) what = { apk: false, update: true };
+
+    const r = await releaseBuild(cfg, buildId, what);
+    if (!r.releasedApk && !r.releasedUpdate) {
+      console.log(`Build ${buildId} retired — it is no longer served to apps.`);
+      return;
+    }
+    console.log(`Released to '${r.channel}': ${describeRelease(r)}`);
+    if (r.releasedApk) {
+      console.log(`  APK channel: ${cfg.url}/api/apps/<slug>/latest`);
+    }
+    if (r.releasedUpdate) {
+      console.log(`  OTA runtimeVersion: ${r.runtimeVersion ?? "(none — apps will NOT match this)"}`);
+    }
+  });
+
+function describeRelease(r: {
+  releasedApk?: boolean;
+  releasedUpdate?: boolean;
+  versionName?: string | null;
+  versionCode?: number | null;
+}): string {
+  const roles = [r.releasedApk && "APK", r.releasedUpdate && "OTA"].filter(Boolean).join(" + ");
+  const version = r.versionName ? ` v${r.versionName} (${r.versionCode ?? "?"})` : "";
+  return `${roles || "nothing"}${version}`;
+}
 
 /** expo prebuild is non-interactive on the worker; missing android.package can make it fail there. */
 async function warnIfNoAndroidPackage(cwd: string): Promise<void> {

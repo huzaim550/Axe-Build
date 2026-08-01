@@ -1,5 +1,10 @@
-# The heavy image: Node 20 + JDK 17 + Android SDK. All toolchains live HERE,
-# never on the host. Builds run as a non-root user in ephemeral workspaces.
+# Node 20 + JDK 17. Toolchains live in the container, never on the host, and
+# builds run as a non-root user in ephemeral workspaces.
+#
+# The Android SDK is deliberately NOT baked in: it lives on the `android-sdk`
+# named volume and entrypoint.sh downloads it once, on first start. Baking it
+# in made every image rebuild re-download ~4GB of SDK/NDK and pushed the image
+# past 8GB. See entrypoint.sh for the bootstrap.
 #
 # Build context is the repo root (see docker-compose.yml).
 
@@ -17,7 +22,10 @@ RUN npm install -g pnpm@9
 # Everything runs as the stock non-root `node` user (uid 1000). The web image
 # uses the same user, so the shared volumes (db-data, artifacts, ...) end up
 # writable by both containers regardless of which one initializes them first.
-# The SDK is node-owned so Gradle/AGP can auto-install missing SDK components.
+#
+# /opt/android-sdk is created empty and node-owned ON PURPOSE: an empty named
+# volume is seeded from the image directory it mounts over, ownership included,
+# so the SDK volume comes up writable by the build user with no runtime chown.
 RUN mkdir -p /opt/android-sdk /workspaces /cache/gradle /cache/npm /cache/ccache \
              /data/uploads /data/artifacts /data/db /repo \
     && chown -R node:node /opt/android-sdk /workspaces /cache /data /repo
@@ -28,27 +36,6 @@ ENV ANDROID_HOME=/opt/android-sdk \
 ENV PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
 
 USER node
-
-# Android command-line tools + the packages a current Expo (SDK 52/53) Android
-# build needs. NDK + CMake are required because the New Architecture (default
-# since SDK 52) compiles C++ in the app build.
-ARG CMDLINE_TOOLS_VERSION=11076708
-RUN cd /tmp \
-    && wget -q "https://dl.google.com/android/repository/commandlinetools-linux-${CMDLINE_TOOLS_VERSION}_latest.zip" -O cmdline-tools.zip \
-    && unzip -q cmdline-tools.zip -d "$ANDROID_HOME/cmdline-tools" \
-    && mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest" \
-    && rm cmdline-tools.zip
-
-# Slim on purpose: only what a current Expo (SDK 52/53) build needs. The SDK
-# dir is writable by the build user, so Gradle/AGP auto-installs anything an
-# older project might additionally require (licenses are pre-accepted).
-RUN yes | sdkmanager --licenses > /dev/null \
-    && sdkmanager \
-         "platform-tools" \
-         "platforms;android-35" \
-         "build-tools;35.0.0" \
-         "ndk;27.1.12297006" \
-         "cmake;3.22.1"
 
 # ---- worker app (Node/TS) ----
 WORKDIR /repo

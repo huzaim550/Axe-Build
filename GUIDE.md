@@ -79,9 +79,11 @@ Options:
 
 | Flag | Values | Default | Notes |
 |---|---|---|---|
-| `--type` | `apk`, `aab` | `apk` | `aab` is for Play Store upload; `apk` is for sideloading/testing |
+| `--type` | `apk`, `aab`, `update` | `apk` | `aab` is for Play Store upload; `apk` is for sideloading/testing; `update` is an OTA-only publish (see §5) |
 | `--profile` | `release`, `debug` | `release` | debug builds are faster but larger/unoptimized |
 | `--abi` | `arm64-v8a`, `arm64-v8a,armeabi-v7a`, `all` | `arm64-v8a` | see below — this is the biggest speed lever |
+| `--ota` | flag | off | also export an OTA bundle alongside the APK, so this build can push JS updates later |
+| `--release` | flag | off | promote the build to the update channels as soon as it succeeds |
 
 ### About `--abi`
 
@@ -103,6 +105,104 @@ in the phone's browser since it's on your home network) and tap it to install. Y
 "install from unknown sources" allowed for whichever app you use to open it — this is a
 Phase 0 **unsigned** build, so Android will flag it as such; that's expected until keystore
 signing (Phase 2) is added.
+
+## 5. Shipping updates to phones that already have the app
+
+Two different mechanisms, because they cover different kinds of change:
+
+| You changed | Use | How long | What the user does |
+|---|---|---|---|
+| JS / React components / images / config | **OTA update** | ~90 s | Nothing — app updates itself on next launch |
+| Native code, a new native module, Expo SDK, `versionCode` | **New APK** | full build | Taps through an install prompt |
+
+Nothing is served to phones until you **release** it, so a green build is never automatically live:
+
+```bash
+build-cli release <buildId>          # promote whatever that build produced
+build-cli release <buildId> --undo   # roll back
+```
+
+### One-time setup for OTA
+
+In your `app.json`:
+
+```json
+{
+  "expo": {
+    "version": "1.4.0",
+    "runtimeVersion": { "policy": "appVersion" },
+    "updates": {
+      "url": "http://192.168.1.50:3000/api/updates/<your-slug>/manifest",
+      "requestHeaders": { "expo-channel-name": "production" }
+    }
+  }
+}
+```
+
+Then `npx expo install expo-updates`, and **build and install a fresh APK**:
+
+```bash
+build-cli build --type apk --ota --release
+```
+
+OTA can't bootstrap itself — the phone has to be running a binary that already knows the update URL.
+
+### Publishing an OTA update
+
+After that, a JS-only change ships without touching Gradle:
+
+```bash
+build-cli build --type update --release
+```
+
+Open the app twice: expo-updates downloads in the background on the first launch and applies on the second. That's standard expo-updates behaviour, not a quirk of this server.
+
+### The runtimeVersion rule (the one that bites)
+
+An update is only ever served to an app reporting the **exact same `runtimeVersion`**. With `"policy": "appVersion"` that's your `expo.version` string.
+
+This is a safety feature: it stops a JS bundle from landing on a binary that lacks the native code it needs. The practical consequence is that **the moment you change anything native, bump `expo.version` and ship a new APK** — old phones keep getting the old bundle until they install it, which is what you want.
+
+### The APK update channel
+
+Once an APK build is released, this is always the current one:
+
+```
+GET http://<server-ip>:3000/api/apps/<slug>/latest
+```
+
+```json
+{
+  "versionName": "1.4.0",
+  "versionCode": 41,
+  "downloadUrl": "http://192.168.1.50:3000/api/apps/<slug>/latest/download",
+  "sizeBytes": 61234567
+}
+```
+
+To prompt users in-app, compare `versionCode` against the running build and open the URL:
+
+```tsx
+import * as Application from "expo-application";
+import { Alert, Linking } from "react-native";
+
+export async function checkForApkUpdate() {
+  const res = await fetch("http://192.168.1.50:3000/api/apps/<slug>/latest");
+  if (!res.ok) return;
+  const latest = await res.json();
+  const current = Number(Application.nativeBuildVersion ?? 0);
+  if (latest.versionCode > current) {
+    Alert.alert("Update available", `Version ${latest.versionName} is ready.`, [
+      { text: "Later" },
+      { text: "Install", onPress: () => Linking.openURL(latest.downloadUrl) },
+    ]);
+  }
+}
+```
+
+Opening the URL hands off to Android's download manager, which offers to install it — deliberately avoiding the `REQUEST_INSTALL_PACKAGES` permission and custom native code. The user taps through "install unknown apps" once.
+
+> These update endpoints are **unauthenticated** — an installed app can't carry your `LOCAL_TOKEN`, and baking the token into a published APK would be worse. They're read-only and your server is LAN-only. Still a reason not to port-forward 3000.
 
 ## Timing expectations
 

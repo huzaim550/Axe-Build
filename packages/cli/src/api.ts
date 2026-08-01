@@ -30,6 +30,18 @@ export function getBuild(cfg: GlobalConfig, id: string) {
   return request(cfg, `/api/builds/${id}`);
 }
 
+export function releaseBuild(
+  cfg: GlobalConfig,
+  id: string,
+  what: { apk?: boolean; update?: boolean } = {},
+) {
+  return request(cfg, `/api/builds/${id}/release`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(what),
+  });
+}
+
 export async function uploadBuild(
   cfg: GlobalConfig,
   opts: {
@@ -37,6 +49,7 @@ export async function uploadBuild(
     buildType: string;
     profile: string;
     abi: string;
+    ota: boolean;
     tarball: Buffer;
   },
 ): Promise<{ buildId: string }> {
@@ -45,6 +58,7 @@ export async function uploadBuild(
   form.set("buildType", opts.buildType);
   form.set("profile", opts.profile);
   form.set("abi", opts.abi);
+  form.set("ota", opts.ota ? "1" : "0");
   form.set("tarball", new Blob([new Uint8Array(opts.tarball)]), "project.tgz");
   return request(cfg, "/api/builds", { method: "POST", body: form });
 }

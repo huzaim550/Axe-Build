@@ -36,10 +36,11 @@ export async function POST(req: Request) {
   const buildType = String(form.get("buildType") ?? "apk");
   const profile = String(form.get("profile") ?? "release");
   const abiInput = String(form.get("abi") ?? "arm64-v8a");
+  const ota = String(form.get("ota") ?? "") === "1";
   const tarball = form.get("tarball");
 
-  if (!["apk", "aab"].includes(buildType)) {
-    return Response.json({ error: "buildType must be apk or aab" }, { status: 400 });
+  if (!["apk", "aab", "update"].includes(buildType)) {
+    return Response.json({ error: "buildType must be apk, aab or update" }, { status: 400 });
   }
   if (!["release", "debug"].includes(profile)) {
     return Response.json({ error: "profile must be release or debug" }, { status: 400 });
@@ -70,6 +71,9 @@ export async function POST(req: Request) {
       buildType,
       profile,
       abi,
+      // An "update" build always produces a bundle; for apk/aab it's opt-in
+      // because `expo export` adds ~a minute to a build that may not need it.
+      ota: buildType === "update" ? true : ota,
       tarballPath: "", // set below once the id names the file
     },
   });

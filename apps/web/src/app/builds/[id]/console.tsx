@@ -16,16 +16,29 @@ const STATUS_COLORS: Record<string, string> = {
 const STAGES: { marker: string; pct: number }[] = [
   { marker: "Extracting source tarball", pct: 5 },
   { marker: "Installing dependencies", pct: 20 },
-  { marker: "Generating android project", pct: 40 },
+  { marker: "Reading app config", pct: 32 },
+  { marker: "Exporting update bundle", pct: 36 },
+  { marker: "Generating android project", pct: 42 },
   { marker: "Running Gradle", pct: 55 },
   { marker: "Artifact:", pct: 95 },
 ];
 
-function progressFor(lines: string[], status: string): number {
+// OTA-only builds never reach prebuild/Gradle, so they need their own ladder —
+// otherwise the bar would stop at 36% on a build that is actually finished.
+const UPDATE_STAGES: { marker: string; pct: number }[] = [
+  { marker: "Extracting source tarball", pct: 10 },
+  { marker: "Installing dependencies", pct: 40 },
+  { marker: "Reading app config", pct: 60 },
+  { marker: "Exporting update bundle", pct: 75 },
+  { marker: "Update bundle ready", pct: 95 },
+];
+
+function progressFor(lines: string[], status: string, buildType: string): number {
   if (status === "success") return 100;
+  const stages = buildType === "update" ? UPDATE_STAGES : STAGES;
   let pct = status === "queued" ? 0 : 2;
   for (const line of lines) {
-    for (const stage of STAGES) {
+    for (const stage of stages) {
       if (line.includes(stage.marker) && stage.pct > pct) pct = stage.pct;
     }
   }
@@ -36,10 +49,12 @@ export function BuildConsole({
   buildId,
   token,
   initialStatus,
+  buildType,
 }: {
   buildId: string;
   token: string;
   initialStatus: string;
+  buildType: string;
 }) {
   const [lines, setLines] = useState<string[]>([]);
   const [status, setStatus] = useState(initialStatus);
@@ -72,7 +87,7 @@ export function BuildConsole({
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
   }, [lines]);
 
-  const pct = progressFor(lines, status);
+  const pct = progressFor(lines, status, buildType);
   const barColor = status === "failed" ? "#ef4444" : status === "canceled" ? "#f59e0b" : "#3b82f6";
 
   return (

@@ -2,19 +2,33 @@ export interface BuildSpec {
   buildId: string;
   /** Absolute path to the uploaded source tarball (read-only). */
   tarballPath: string;
-  buildType: "apk" | "aab";
+  /** "update" is OTA-only: it exports a JS bundle and never runs prebuild/Gradle. */
+  buildType: "apk" | "aab" | "update";
   profile: "release" | "debug";
   /** Comma-separated ABI list, e.g. "arm64-v8a". Fewer ABIs = far less C++ to compile. */
   abis: string;
+  /** Also export an OTA bundle alongside the apk/aab. Ignored when buildType is "update". */
+  ota: boolean;
   /** Fresh, empty directory the runner may do anything in. Deleted afterwards. */
   workspaceDir: string;
   /** Absolute deadline for the whole build. */
   deadline: number;
 }
 
+/** App identity, read from `expo config` — all optional, a build still succeeds without it. */
+export interface AppMeta {
+  versionName?: string;
+  versionCode?: number;
+  androidPackage?: string;
+  runtimeVersion?: string;
+}
+
 export interface RunnerResult {
-  /** Path (inside the workspace) of the produced artifact. */
-  artifactSourcePath: string;
+  /** Path (inside the workspace) of the produced artifact. Absent for OTA-only builds. */
+  artifactSourcePath?: string;
+  /** Directory (inside the workspace) holding the `expo export` output, if one was made. */
+  updateSourceDir?: string;
+  meta: AppMeta;
 }
 
 /**

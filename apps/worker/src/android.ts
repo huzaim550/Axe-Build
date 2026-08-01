@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { execStream } from "./exec.js";
-import type { BuildSpec, Runner, RunnerResult } from "./runner.js";
+import { execCapture, execStream } from "./exec.js";
+import type { AppMeta, BuildSpec, Runner, RunnerResult } from "./runner.js";
 
 const GRADLE_TASKS: Record<string, string> = {
   "apk/release": "assembleRelease",
@@ -39,6 +39,31 @@ export class AndroidRunner implements Runner {
       { cwd: projectDir, timeoutMs: remaining() },
     );
 
+    yield `==> Reading app config`;
+    const meta = await readAppMeta(projectDir, remaining());
+    yield `    version=${meta.versionName ?? "?"} versionCode=${meta.versionCode ?? "?"} ` +
+      `runtimeVersion=${meta.runtimeVersion ?? "?"} package=${meta.androidPackage ?? "?"}`;
+    if (!meta.runtimeVersion) {
+      yield `    note: no runtimeVersion in app config — OTA updates need one (see GUIDE.md)`;
+    }
+
+    // OTA bundle. `update` builds stop here: a JS-only change needs no native
+    // toolchain at all, which is why this path takes ~90s instead of ~15min.
+    let updateSourceDir: string | undefined;
+    if (spec.buildType === "update" || spec.ota) {
+      updateSourceDir = path.join(ws, "update");
+      yield `==> Exporting update bundle (expo export)`;
+      yield* execStream(
+        "npx",
+        ["expo", "export", "--platform", "android", "--output-dir", updateSourceDir],
+        { cwd: projectDir, timeoutMs: remaining() },
+      );
+      if (spec.buildType === "update") {
+        yield `==> Update bundle ready (no APK — this is an OTA-only build)`;
+        return { updateSourceDir, meta };
+      }
+    }
+
     yield `==> Generating android project (expo prebuild)`;
     yield* execStream(
       "npx",
@@ -70,8 +95,55 @@ export class AndroidRunner implements Runner {
     }
     yield `==> Artifact: ${path.relative(ws, artifact)}`;
 
-    return { artifactSourcePath: artifact };
+    return { artifactSourcePath: artifact, updateSourceDir, meta };
   }
+}
+
+/**
+ * `expo config --type public` resolves app.json / app.config.js the same way
+ * prebuild does, so these values match what actually lands in the APK.
+ * Never fatal: a missing version only costs us the update channels.
+ */
+async function readAppMeta(projectDir: string, timeoutMs: number): Promise<AppMeta> {
+  let raw: string;
+  try {
+    raw = await execCapture("npx", ["expo", "config", "--type", "public", "--json"], {
+      cwd: projectDir,
+      timeoutMs: Math.min(timeoutMs, 120_000),
+    });
+  } catch {
+    return {};
+  }
+
+  // The CLI can print a banner before the JSON, so start at the first brace.
+  const start = raw.indexOf("{");
+  if (start === -1) return {};
+  let cfg: any;
+  try {
+    cfg = JSON.parse(raw.slice(start));
+  } catch {
+    return {};
+  }
+
+  // runtimeVersion may be a policy object ({ policy: "appVersion" }); Expo
+  // resolves it to a string here only when it can. A policy we can't resolve
+  // is left undefined rather than stored as "[object Object]".
+  const rv = cfg?.runtimeVersion;
+  const runtimeVersion =
+    typeof rv === "string"
+      ? rv
+      : rv?.policy === "appVersion" && typeof cfg?.version === "string"
+        ? cfg.version
+        : undefined;
+
+  return {
+    versionName: typeof cfg?.version === "string" ? cfg.version : undefined,
+    versionCode:
+      typeof cfg?.android?.versionCode === "number" ? cfg.android.versionCode : undefined,
+    androidPackage:
+      typeof cfg?.android?.package === "string" ? cfg.android.package : undefined,
+    runtimeVersion,
+  };
 }
 
 async function exists(p: string): Promise<boolean> {

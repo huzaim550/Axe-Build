@@ -22,9 +22,10 @@ model Build {
   project      Project   @relation(fields: [projectId], references: [id])
   status       String // queued | running | success | failed | canceled
   platform     String    @default("android")
-  buildType    String    @default("apk") // apk | aab
+  buildType    String    @default("apk") // apk | aab | update (OTA-only, skips Gradle)
   profile      String    @default("release") // release | debug
   abi          String    @default("arm64-v8a") // comma-separated ABI list to compile
+  ota          Boolean   @default(false) // also export an OTA bundle alongside the apk/aab
   tarballPath  String // path on the uploads volume
   artifactPath String? // path on the artifacts volume
   logPath      String? // full log file on the artifacts volume
@@ -33,6 +34,28 @@ model Build {
   createdAt    DateTime  @default(now())
   startedAt    DateTime?
   finishedAt   DateTime?
+
+  // --- app identity, read from `expo config` during the build ---
+  versionName    String? // expo.version, e.g. "1.4.0"
+  versionCode    Int? // expo.android.versionCode — what the APK channel compares
+  androidPackage String? // expo.android.package
+  // The OTA compatibility key. An update is only ever served to an installed
+  // app reporting the SAME runtimeVersion, which is what stops a JS bundle
+  // from landing on a binary that lacks the native code it needs.
+  runtimeVersion String?
+
+  // --- OTA payload (expo export output), when this build produced one ---
+  updateDirPath String? // /data/artifacts/<id>/update
+  updateUuid    String? // the expo manifest `id` — must be a UUID, not a cuid
+
+  // Release switches. Two flags, not one: a `--ota` build carries both an APK
+  // and an update bundle, and promoting a later OTA-only build must not also
+  // retire that build's APK from /api/apps/<slug>/latest.
+  channel        String  @default("production")
+  releasedApk    Boolean @default(false) // serves /api/apps/<slug>/latest
+  releasedUpdate Boolean @default(false) // serves the OTA manifest endpoint
+
+  @@index([projectId, channel])
 }
 
 // Phase 2 — present in the schema so the DB never needs a breaking migration,
