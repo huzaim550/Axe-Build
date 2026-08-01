@@ -1,0 +1,48 @@
+# Cloudflare Tunnel config for publishing ONLY the update endpoints.
+#
+# This runs on the server machine (host side, not in a container):
+#
+#   cloudflared tunnel login
+#   cloudflared tunnel create mybuild-updates
+#   cloudflared tunnel route dns mybuild-updates updates.manzaronline.site
+#   cp cloudflared.example.yml ~/.cloudflared/config.yml   # then edit
+#   cloudflared tunnel run mybuild-updates
+#
+# Two independent layers keep the dashboard off the internet:
+#   1. the `path` rules below, and
+#   2. PUBLIC_HOSTNAME in docker-compose.yml, which makes the app itself 404
+#      anything non-public on that hostname (apps/web/src/middleware.ts).
+# Keep both. Either one alone is a single point of failure, and the thing being
+# protected is a token that grants arbitrary builds on this machine.
+
+tunnel: mybuild-updates
+credentials-file: /home/YOUR_USER/.cloudflared/YOUR_TUNNEL_ID.json
+
+ingress:
+  # --- expo-updates: manifest + asset downloads ---
+  - hostname: updates.manzaronline.site
+    path: ^/api/updates/[^/]+/manifest/?$
+    service: http://localhost:3000
+  - hostname: updates.manzaronline.site
+    path: ^/api/updates/[^/]+/assets/?$
+    service: http://localhost:3000
+
+  # --- APK update channel: version check + download ---
+  - hostname: updates.manzaronline.site
+    path: ^/api/apps/[^/]+/latest/?$
+    service: http://localhost:3000
+  - hostname: updates.manzaronline.site
+    path: ^/api/apps/[^/]+/latest/download/?$
+    service: http://localhost:3000
+
+  # --- liveness, so the landing page can show accurate status ---
+  - hostname: updates.manzaronline.site
+    path: ^/api/health/?$
+    service: http://localhost:3000
+
+  # Anything else on this hostname is refused before it ever reaches the app.
+  - hostname: updates.manzaronline.site
+    service: http_status:404
+
+  # Required final catch-all.
+  - service: http_status:404

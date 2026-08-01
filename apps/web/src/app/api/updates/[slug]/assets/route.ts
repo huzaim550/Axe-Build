@@ -61,8 +61,11 @@ const CONTENT_TYPES: Record<string, string> = {
   ".gif": "image/gif",
   ".webp": "image/webp",
   ".svg": "image/svg+xml",
+  ".xml": "application/xml",
   ".ttf": "font/ttf",
   ".otf": "font/otf",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
   ".json": "application/json",
 };
 

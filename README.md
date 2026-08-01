@@ -84,6 +84,26 @@ Installed apps can be updated two ways: an **OTA update** (JS/assets only, self-
 new **APK** via a stable "latest" endpoint. Builds are never live until you promote them with
 `build-cli release <buildId>`. Full walkthrough in [GUIDE.md](GUIDE.md#5-shipping-updates-to-phones-that-already-have-the-app).
 
+### Publishing updates to the internet
+
+To reach phones that are not on your LAN, publish this server through a tunnel
+(`cloudflared.example.yml` is a working Cloudflare Tunnel config).
+
+> **The dashboard must never be exposed.** It renders `LOCAL_TOKEN` into its HTML so download
+> links work — anyone who loads `/` on a public hostname could read that token and queue
+> arbitrary builds on this machine.
+
+Two independent layers prevent that; use both:
+
+1. **`PUBLIC_HOSTNAME`** (docker-compose.yml). Set it to the public name, e.g.
+   `updates.example.com`. `apps/web/src/middleware.ts` then serves only the four read-only
+   update endpoints on that hostname and 404s everything else. Requests on LAN addresses are
+   unaffected, so the dashboard keeps working at `http://<server-ip>:3000`.
+2. **Tunnel ingress `path` rules**, so non-public paths are refused before they reach the app.
+
+Neither layer is a substitute for the other: one is config you could forget to apply, the other
+lives in a file you could overwrite.
+
 ## API (token required unless marked public)
 
 | Route | What |

@@ -202,7 +202,36 @@ export async function checkForApkUpdate() {
 
 Opening the URL hands off to Android's download manager, which offers to install it — deliberately avoiding the `REQUEST_INSTALL_PACKAGES` permission and custom native code. The user taps through "install unknown apps" once.
 
-> These update endpoints are **unauthenticated** — an installed app can't carry your `LOCAL_TOKEN`, and baking the token into a published APK would be worse. They're read-only and your server is LAN-only. Still a reason not to port-forward 3000.
+> These update endpoints are **unauthenticated** — an installed app can't carry your `LOCAL_TOKEN`, and baking the token into a published APK would be worse. They're read-only. Never port-forward 3000; if you need them reachable from outside your LAN, use the tunnel setup below instead.
+
+### Reaching phones outside your home network
+
+A LAN URL only works while the phone is on your wifi. To update apps anywhere, publish the
+build server through a Cloudflare tunnel and point the app at the public hostname:
+
+```bash
+cloudflared tunnel create mybuild-updates
+cloudflared tunnel route dns mybuild-updates updates.example.com
+cp cloudflared.example.yml ~/.cloudflared/config.yml    # then edit it
+cloudflared tunnel run mybuild-updates
+```
+
+Then set `PUBLIC_HOSTNAME=updates.example.com` in `docker-compose.yml` and `make up`. **Both
+steps are required** — the tunnel config restricts paths at the edge, and `PUBLIC_HOSTNAME`
+makes the app itself refuse non-public paths on that hostname. The dashboard embeds your
+`LOCAL_TOKEN` in its HTML, so exposing it would hand out build access to anyone who loads the
+page.
+
+Verify the lockdown right after you set it up:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' https://updates.example.com/            # expect 404
+curl -s -o /dev/null -w '%{http_code}\n' https://updates.example.com/api/builds  # expect 404
+curl -s -o /dev/null -w '%{http_code}\n' https://updates.example.com/api/health  # expect 200
+```
+
+Switching to HTTPS also avoids a real trap: Expo release builds set `usesCleartextTraffic` to
+false, so a plain `http://` update URL is silently blocked in production builds.
 
 ## Timing expectations
 

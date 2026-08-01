@@ -33,6 +33,9 @@ const CONTENT_TYPES: Record<string, string> = {
   gif: "image/gif",
   webp: "image/webp",
   svg: "image/svg+xml",
+  // Android vector drawables ship as plain .xml assets — expo-router pulls in
+  // a couple of these, so it is worth typing correctly rather than as bytes.
+  xml: "application/xml",
   ttf: "font/ttf",
   otf: "font/otf",
   woff: "font/woff",

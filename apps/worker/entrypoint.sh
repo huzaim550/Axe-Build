@@ -12,10 +12,12 @@ set -e
 # ---------------------------------------------------------------------------
 ANDROID_HOME="${ANDROID_HOME:-/opt/android-sdk}"
 CMDLINE_TOOLS_VERSION="${CMDLINE_TOOLS_VERSION:-11076708}"
-# Slim on purpose: only what a current Expo (SDK 52/53) build needs. NDK +
-# CMake are required because the New Architecture (default since SDK 52)
-# compiles C++ in the app build.
-ANDROID_SDK_PACKAGES="${ANDROID_SDK_PACKAGES:-platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.1.12297006 cmake;3.22.1}"
+# Slim on purpose: only what a current Expo (SDK 56 / RN 0.85) build needs.
+# These track react-native/gradle/libs.versions.toml: compileSdk 36,
+# buildTools 36.0.0, ndk 27.1.12297006, and RN's cmake 3.30.5. NDK + CMake are
+# required because the New Architecture compiles C++ in the app build.
+# Older projects pinning API 35 / cmake 3.22.1 auto-install them at build time.
+ANDROID_SDK_PACKAGES="${ANDROID_SDK_PACKAGES:-platform-tools platforms;android-36 build-tools;36.0.0 ndk;27.1.12297006 cmake;3.30.5}"
 SDK_MANIFEST="$ANDROID_HOME/.mybuild-sdk-manifest"
 
 if [ ! -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then

@@ -35,6 +35,11 @@ services:
       DATABASE_URL: "file:/data/db/mybuild.db"
       REDIS_URL: "redis://redis:6379"
       LOCAL_TOKEN: "${LOCAL_TOKEN:-dev-local-token}"
+      # Set this ONLY if you publish this server through a tunnel. Requests
+      # arriving on this hostname are restricted to the read-only update
+      # endpoints; the dashboard (which embeds LOCAL_TOKEN in its HTML) and
+      # every write route 404 there. See apps/web/src/middleware.ts.
+      PUBLIC_HOSTNAME: "${PUBLIC_HOSTNAME:-}"
       UPLOADS_DIR: /data/uploads
       ARTIFACTS_DIR: /data/artifacts
     volumes:
@@ -69,7 +74,7 @@ services:
       # Downloaded once into the android-sdk volume by the worker entrypoint,
       # never baked into the image. Edit this to add SDK packages: the next
       # start pulls only what's missing.
-      ANDROID_SDK_PACKAGES: "platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.1.12297006 cmake;3.22.1"
+      ANDROID_SDK_PACKAGES: "platform-tools platforms;android-36 build-tools;36.0.0 ndk;27.1.12297006 cmake;3.30.5"
       # Gradle build JVM stays well inside the container's 9g budget
       # (written to $GRADLE_USER_HOME/gradle.properties by the entrypoint).
       GRADLE_JVM_ARGS: "-Xmx4g -XX:MaxMetaspaceSize=1g"
