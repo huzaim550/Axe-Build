@@ -216,11 +216,14 @@ cp cloudflared.example.yml ~/.cloudflared/config.yml    # then edit it
 cloudflared tunnel run mybuild-updates
 ```
 
-Then set `PUBLIC_HOSTNAME=updates.example.com` in `docker-compose.yml` and `make up`. **Both
-steps are required** — the tunnel config restricts paths at the edge, and `PUBLIC_HOSTNAME`
-makes the app itself refuse non-public paths on that hostname. The dashboard embeds your
-`LOCAL_TOKEN` in its HTML, so exposing it would hand out build access to anyone who loads the
-page.
+In `cloudflared.example.yml`, point `service:` at wherever the web container listens — that is
+`http://localhost:3000` if cloudflared runs on the Docker host, or `http://<server-lan-ip>:3000`
+if it runs on another machine. A wrong address here surfaces as **502**; a 404 on everything
+means no ingress rule matched the hostname.
+
+Then set `PUBLIC_HOSTNAME=updates.example.com` in `docker-compose.yml` and `make up`. That is
+what keeps the dashboard private: it embeds your `LOCAL_TOKEN` in its HTML, so exposing it would
+hand build access to anyone who loads the page.
 
 Verify the lockdown right after you set it up:
 

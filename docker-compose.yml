@@ -26,20 +26,25 @@ services:
     restart: unless-stopped
     depends_on:
       - redis
-    # Reachable from the home LAN (0.0.0.0). Do NOT port-forward 3000 on your
-    # router — NAT is what keeps this home-only. Set BIND_ADDR=127.0.0.1 to
-    # restrict it to the server machine itself.
+    # Reachable from the home LAN (0.0.0.0). Still do NOT port-forward 3000 on
+    # your router: the supported way to reach this from outside is a tunnel
+    # plus PUBLIC_HOSTNAME below, which exposes only the read-only update
+    # endpoints. A port-forward would expose the whole dashboard instead.
+    # Note BIND_ADDR=127.0.0.1 only works if cloudflared runs on this machine.
     ports:
       - "${BIND_ADDR:-0.0.0.0}:3000:3000"
     environment:
       DATABASE_URL: "file:/data/db/mybuild.db"
       REDIS_URL: "redis://redis:6379"
       LOCAL_TOKEN: "${LOCAL_TOKEN:-dev-local-token}"
-      # Set this ONLY if you publish this server through a tunnel. Requests
-      # arriving on this hostname are restricted to the read-only update
+      # The hostname this server is published on through the Cloudflare tunnel.
+      # Requests arriving on it are restricted to the read-only update
       # endpoints; the dashboard (which embeds LOCAL_TOKEN in its HTML) and
-      # every write route 404 there. See apps/web/src/middleware.ts.
-      PUBLIC_HOSTNAME: "${PUBLIC_HOSTNAME:-}"
+      # every write route 404 there. LAN addresses are unaffected.
+      # Defaulted rather than left empty so a missing .env fails CLOSED.
+      # Read at container start, not baked into the image — changing it needs
+      # only a restart. See apps/web/src/middleware.ts.
+      PUBLIC_HOSTNAME: "${PUBLIC_HOSTNAME:-updates.manzaronline.site}"
       UPLOADS_DIR: /data/uploads
       ARTIFACTS_DIR: /data/artifacts
     volumes:

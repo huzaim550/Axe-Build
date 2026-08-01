@@ -1,48 +1,60 @@
-# Cloudflare Tunnel config for publishing ONLY the update endpoints.
+# Cloudflare Tunnel config for publishing the update endpoints.
 #
-# This runs on the server machine (host side, not in a container):
+# ⚠ ALREADY RUNNING A TUNNEL? DO NOT COPY THIS OVER YOUR config.yml.
+# cloudflared reads ONE config file per process, so overwriting it takes your
+# existing hostnames offline. A single tunnel can serve many hostnames — that
+# is the intended pattern — so just add the `updates` block from the ingress
+# list below to your existing file, above its final catch-all rule, and point
+# DNS at that tunnel:
+#
+#   cp ~/.cloudflared/config.yml ~/.cloudflared/config.yml.bak
+#   # ...edit, adding one hostname rule...
+#   cloudflared tunnel route dns <existing-tunnel> updates.example.com
+#   cloudflared tunnel ingress validate     # checks EVERY rule still resolves
+#   sudo systemctl restart cloudflared
+#
+# Setup from scratch (no other tunnel on this machine):
 #
 #   cloudflared tunnel login
 #   cloudflared tunnel create mybuild-updates
-#   cloudflared tunnel route dns mybuild-updates updates.manzaronline.site
-#   cp cloudflared.example.yml ~/.cloudflared/config.yml   # then edit
+#   cloudflared tunnel route dns mybuild-updates updates.example.com
+#   cp cloudflared.example.yml ~/.cloudflared/config.yml   # then edit below
 #   cloudflared tunnel run mybuild-updates
 #
-# Two independent layers keep the dashboard off the internet:
-#   1. the `path` rules below, and
-#   2. PUBLIC_HOSTNAME in docker-compose.yml, which makes the app itself 404
-#      anything non-public on that hostname (apps/web/src/middleware.ts).
-# Keep both. Either one alone is a single point of failure, and the thing being
-# protected is a token that grants arbitrary builds on this machine.
+# ---------------------------------------------------------------------------
+# What stops the dashboard leaking
+#
+# The dashboard embeds LOCAL_TOKEN in its HTML, so it must never be publicly
+# reachable. That is enforced by PUBLIC_HOSTNAME in docker-compose.yml: the app
+# itself 404s the dashboard and every write route on that hostname
+# (apps/web/src/middleware.ts).
+#
+# This file deliberately does NOT try to repeat that restriction with `path:`
+# regexes. An earlier version did, and a single non-matching rule silently sent
+# every request to the catch-all below — a 404 on everything, including the
+# endpoints that were supposed to work. A second layer that fails this quietly
+# is worse than no second layer, because it looks like it is working.
+#
+# So: keep it simple here, and verify the app-level lockdown after setup:
+#
+#   curl -s -o /dev/null -w '%{http_code}\n' https://updates.example.com/            # 404
+#   curl -s -o /dev/null -w '%{http_code}\n' https://updates.example.com/api/builds  # 404
+#   curl -s -o /dev/null -w '%{http_code}\n' https://updates.example.com/api/health  # 200
+#
+# If / returns 200 and HTML, STOP and fix PUBLIC_HOSTNAME before going further.
+# ---------------------------------------------------------------------------
 
 tunnel: mybuild-updates
 credentials-file: /home/YOUR_USER/.cloudflared/YOUR_TUNNEL_ID.json
 
 ingress:
-  # --- expo-updates: manifest + asset downloads ---
-  - hostname: updates.manzaronline.site
-    path: ^/api/updates/[^/]+/manifest/?$
-    service: http://localhost:3000
-  - hostname: updates.manzaronline.site
-    path: ^/api/updates/[^/]+/assets/?$
-    service: http://localhost:3000
-
-  # --- APK update channel: version check + download ---
-  - hostname: updates.manzaronline.site
-    path: ^/api/apps/[^/]+/latest/?$
-    service: http://localhost:3000
-  - hostname: updates.manzaronline.site
-    path: ^/api/apps/[^/]+/latest/download/?$
-    service: http://localhost:3000
-
-  # --- liveness, so the landing page can show accurate status ---
-  - hostname: updates.manzaronline.site
-    path: ^/api/health/?$
-    service: http://localhost:3000
-
-  # Anything else on this hostname is refused before it ever reaches the app.
-  - hostname: updates.manzaronline.site
-    service: http_status:404
+  - hostname: updates.example.com
+    # Where mybuild's web container is listening. Which value you need depends
+    # on where THIS cloudflared process runs:
+    #   - on the same machine as Docker  -> http://localhost:3000
+    #   - on any other machine on the LAN -> http://<server-lan-ip>:3000
+    # A wrong address here shows up as 502, not 404.
+    service: http://192.168.1.200:3000
 
   # Required final catch-all.
   - service: http_status:404

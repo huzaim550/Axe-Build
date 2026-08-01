@@ -93,16 +93,24 @@ To reach phones that are not on your LAN, publish this server through a tunnel
 > links work — anyone who loads `/` on a public hostname could read that token and queue
 > arbitrary builds on this machine.
 
-Two independent layers prevent that; use both:
+This is enforced by **`PUBLIC_HOSTNAME`** in `docker-compose.yml`. Set it to the public name,
+e.g. `updates.example.com`; `apps/web/src/middleware.ts` then serves only the read-only update
+endpoints on that hostname and 404s everything else. Requests on LAN addresses are unaffected,
+so the dashboard keeps working at `http://<server-ip>:3000`. The value is read at container
+start, so changing it needs only a restart, not a rebuild.
 
-1. **`PUBLIC_HOSTNAME`** (docker-compose.yml). Set it to the public name, e.g.
-   `updates.example.com`. `apps/web/src/middleware.ts` then serves only the four read-only
-   update endpoints on that hostname and 404s everything else. Requests on LAN addresses are
-   unaffected, so the dashboard keeps working at `http://<server-ip>:3000`.
-2. **Tunnel ingress `path` rules**, so non-public paths are refused before they reach the app.
+Always verify after setup — this is the check that matters:
 
-Neither layer is a substitute for the other: one is config you could forget to apply, the other
-lives in a file you could overwrite.
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' https://updates.example.com/            # expect 404
+curl -s -o /dev/null -w '%{http_code}\n' https://updates.example.com/api/builds  # expect 404
+curl -s -o /dev/null -w '%{http_code}\n' https://updates.example.com/api/health  # expect 200
+```
+
+Restricting paths in the tunnel's ingress rules as a second layer is tempting, but a rule that
+fails to match sends *everything* to the catch-all — you get 404s on the working endpoints too,
+and it looks like a routing bug rather than a misconfigured guard. Keep the tunnel config to one
+hostname → one service and let the app do the filtering.
 
 ## API (token required unless marked public)
 
