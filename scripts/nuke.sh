@@ -30,10 +30,11 @@ fi
 # NOT `down -v`: that would take android-sdk with it.
 "$DOCKER" compose down --remove-orphans
 "$DOCKER" volume rm -f "${VOLUMES[@]}" 2>/dev/null || true
-"$DOCKER" rmi -f mybuild-web mybuild-worker 2>/dev/null || true
+# Both names: images were tagged mybuild-* before the project was renamed.
+"$DOCKER" rmi -f axebuild-web axebuild-worker mybuild-web mybuild-worker 2>/dev/null || true
 
 echo ""
-echo "Nuked: all mybuild containers, images, and state volumes are gone."
+echo "Nuked: all Axe Build containers, images, and state volumes are gone."
 if [ "$NUKE_SDK" = "1" ]; then
   echo "The Android SDK volume was dropped too — the next 'make up' re-downloads it."
 else

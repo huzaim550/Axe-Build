@@ -1,142 +1,169 @@
-import type { CSSProperties } from "react";
 import Link from "next/link";
-import { db } from "@mybuild/db";
+import { db } from "@axebuild/db";
 import { token } from "@/lib/auth";
+import { fmtAgo, fmtBytes, fmtDuration, statusClass } from "@/lib/format";
 import { AutoRefresh } from "./auto-refresh";
+import { DeleteBuildButton } from "./delete-build-button";
 
 export const dynamic = "force-dynamic";
 
-const STATUS_COLORS: Record<string, string> = {
-  queued: "#8a8f98",
-  running: "#3b82f6",
-  success: "#22c55e",
-  failed: "#ef4444",
-  canceled: "#f59e0b",
-};
-
-function fmtBytes(n: number | null): string {
-  if (n == null) return "—";
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
-}
-
-function fmtDuration(start: Date | null, end: Date | null): string {
-  if (!start) return "—";
-  const ms = (end ? end.getTime() : Date.now()) - start.getTime();
-  const s = Math.floor(ms / 1000);
-  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
-}
+const RECENT = 50;
 
 export default async function Home() {
-  const builds = await db().build.findMany({
-    orderBy: { createdAt: "desc" },
-    take: 50,
-    include: { project: { select: { name: true, slug: true } } },
-  });
+  const [builds, totals] = await Promise.all([
+    db().build.findMany({
+      orderBy: { createdAt: "desc" },
+      take: RECENT,
+      include: { project: { select: { name: true, slug: true } } },
+    }),
+    db().build.groupBy({ by: ["status"], _count: { _all: true } }),
+  ]);
 
-  const th: CSSProperties = {
-    textAlign: "left",
-    padding: "8px 12px",
-    borderBottom: "1px solid #2a2f3a",
-    color: "#8a8f98",
-    fontWeight: 500,
-    fontSize: 13,
-  };
-  const td: CSSProperties = {
-    padding: "8px 12px",
-    borderBottom: "1px solid #1a1f29",
-    fontSize: 14,
-  };
+  const count = (status: string) =>
+    totals.find((row) => row.status === status)?._count._all ?? 0;
+  const total = totals.reduce((sum, row) => sum + row._count._all, 0);
+  const succeeded = count("success");
+  const finished = succeeded + count("failed") + count("canceled");
+  const inFlight = count("queued") + count("running");
+  const diskUsed = builds.reduce((sum, b) => sum + (b.sizeBytes ?? 0), 0);
 
   return (
-    <main style={{ maxWidth: 960, margin: "0 auto", padding: "32px 16px" }}>
-      <AutoRefresh />
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
-        <h1 style={{ fontSize: 22, marginBottom: 4 }}>mybuild</h1>
-        <Link href="/notifications" style={{ color: "#3b82f6", fontSize: 14 }}>
-          notifications →
-        </Link>
+    <main className="container">
+      <div className="page-head">
+        <div>
+          <h1>Builds</h1>
+          <p>Android APKs, AABs and OTA bundles, built on this machine.</p>
+        </div>
+        <AutoRefresh />
       </div>
-      <p style={{ color: "#8a8f98", marginTop: 0, marginBottom: 24 }}>
-        Local Expo Android builds — {builds.length} recent build{builds.length === 1 ? "" : "s"}
-      </p>
+
+      <div className="stats">
+        <Stat label="Builds" value={String(total)} sub={`${RECENT} most recent shown`} />
+        <Stat
+          label="Succeeded"
+          value={finished === 0 ? "—" : `${Math.round((succeeded / finished) * 100)}%`}
+          sub={`${succeeded} of ${finished} finished`}
+        />
+        <Stat
+          label="In flight"
+          value={String(inFlight)}
+          sub={inFlight === 0 ? "queue is idle" : "queued or running"}
+        />
+        <Stat label="Artifacts" value={fmtBytes(diskUsed)} sub="across the builds below" />
+      </div>
+
+      <div className="section-head">
+        <h2>Recent</h2>
+      </div>
 
       {builds.length === 0 ? (
-        <p style={{ color: "#8a8f98" }}>
-          No builds yet. Run <code>build-cli build</code> inside an Expo project.
-        </p>
+        <div className="card empty">
+          <h2>No builds yet</h2>
+          <p>Run the CLI inside an Expo project and the build will appear here.</p>
+          <pre>axe build --type apk</pre>
+        </div>
       ) : (
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead>
-            <tr>
-              <th style={th}>Project</th>
-              <th style={th}>Status</th>
-              <th style={th}>Type</th>
-              <th style={th}>Version</th>
-              <th style={th}>Duration</th>
-              <th style={th}>Size</th>
-              <th style={th}>Started</th>
-              <th style={th}>Log</th>
-              <th style={th}>Artifact</th>
-            </tr>
-          </thead>
-          <tbody>
-            {builds.map((b) => (
-              <tr key={b.id}>
-                <td style={td}>
-                  {b.project.name}
-                  <div style={{ color: "#565c66", fontSize: 12 }}>{b.id}</div>
-                </td>
-                <td style={td}>
-                  <span style={{ color: STATUS_COLORS[b.status] ?? "#e6e6e6" }}>● {b.status}</span>
-                  {b.error && (
-                    <div style={{ color: "#ef4444", fontSize: 12, maxWidth: 240 }}>
-                      {b.error.slice(0, 120)}
-                    </div>
-                  )}
-                </td>
-                <td style={td}>
-                  {b.buildType} / {b.profile}
-                  <div style={{ color: "#565c66", fontSize: 12 }}>
-                    {b.buildType === "update" ? "OTA only" : b.abi}
-                  </div>
-                </td>
-                <td style={td}>
-                  {b.versionName ? `${b.versionName} (${b.versionCode ?? "?"})` : "—"}
-                  {(b.releasedApk || b.releasedUpdate) && (
-                    <div style={{ color: "#22c55e", fontSize: 12 }}>
-                      ● live{b.releasedApk && b.releasedUpdate
-                        ? " APK+OTA"
-                        : b.releasedApk
-                          ? " APK"
-                          : " OTA"}
-                    </div>
-                  )}
-                </td>
-                <td style={td}>{fmtDuration(b.startedAt, b.finishedAt)}</td>
-                <td style={td}>{fmtBytes(b.sizeBytes)}</td>
-                <td style={td}>{b.createdAt.toLocaleString()}</td>
-                <td style={td}>
-                  <Link href={`/builds/${b.id}`} style={{ color: "#3b82f6" }}>
-                    view
-                  </Link>
-                </td>
-                <td style={td}>
-                  {b.status === "success" && b.artifactPath ? (
-                    <a
-                      href={`/api/builds/${b.id}/artifact?token=${encodeURIComponent(token())}`}
-                      style={{ color: "#3b82f6" }}
-                    >
-                      download
-                    </a>
-                  ) : (
-                    "—"
-                  )}
-                </td>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Project</th>
+                <th>Status</th>
+                <th>Type</th>
+                <th>Version</th>
+                <th>Took</th>
+                <th>Size</th>
+                <th>Started</th>
+                <th />
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {builds.map((b) => (
+                <tr key={b.id}>
+                  <td>
+                    <div className="cell-main">
+                      <Link href={`/builds/${b.id}`}>{b.project.name}</Link>
+                    </div>
+                    <div className="cell-sub">{b.id}</div>
+                  </td>
+                  <td>
+                    <span className={statusClass(b.status)}>{b.status}</span>
+                    {b.error && (
+                      <div
+                        className="cell-sub wrap-text"
+                        style={{ color: "var(--failed)", maxWidth: 220 }}
+                      >
+                        {b.error.slice(0, 110)}
+                      </div>
+                    )}
+                  </td>
+                  <td>
+                    <span className="tag">
+                      {b.buildType}/{b.profile}
+                    </span>
+                    <div className="cell-sub">{b.buildType === "update" ? "OTA only" : b.abi}</div>
+                  </td>
+                  <td>
+                    {b.versionName ? (
+                      <>
+                        <div className="cell-main mono">{b.versionName}</div>
+                        <div className="cell-sub">code {b.versionCode ?? "?"}</div>
+                      </>
+                    ) : (
+                      <span className="faint">—</span>
+                    )}
+                    {(b.releasedApk || b.releasedUpdate) && (
+                      <div style={{ marginTop: 4 }}>
+                        <span className="pill pill-live">
+                          live
+                          {b.releasedApk && b.releasedUpdate
+                            ? " APK+OTA"
+                            : b.releasedApk
+                              ? " APK"
+                              : " OTA"}
+                        </span>
+                      </div>
+                    )}
+                  </td>
+                  <td className="mono dim">{fmtDuration(b.startedAt, b.finishedAt)}</td>
+                  <td className="mono dim">{fmtBytes(b.sizeBytes)}</td>
+                  <td className="dim" title={b.createdAt.toLocaleString()}>
+                    {fmtAgo(b.createdAt)}
+                  </td>
+                  <td>
+                    <div className="row" style={{ gap: 6, flexWrap: "nowrap" }}>
+                      <Link className="btn btn-sm" href={`/builds/${b.id}`}>
+                        Open
+                      </Link>
+                      {b.status === "success" && b.artifactPath && (
+                        <a
+                          className="btn btn-sm"
+                          href={`/api/builds/${b.id}/artifact?token=${encodeURIComponent(token())}`}
+                        >
+                          APK
+                        </a>
+                      )}
+                      {b.status !== "queued" && b.status !== "running" && (
+                        <DeleteBuildButton buildId={b.id} token={token()} />
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </main>
+  );
+}
+
+function Stat({ label, value, sub }: { label: string; value: string; sub: string }) {
+  return (
+    <div className="stat">
+      <div className="stat-label">{label}</div>
+      <div className="stat-value">{value}</div>
+      <div className="stat-sub">{sub}</div>
+    </div>
   );
 }

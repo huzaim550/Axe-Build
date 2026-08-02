@@ -1,5 +1,5 @@
-import { db } from "@mybuild/db";
-import type { Notification } from "@mybuild/db";
+import { db } from "@axebuild/db";
+import type { Notification } from "@axebuild/db";
 
 /**
  * In-app notifications.

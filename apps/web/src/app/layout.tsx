@@ -1,23 +1,19 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { SiteNav } from "./nav";
+import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "mybuild — local Expo Android builds",
-  description: "Self-hosted, localhost-only Android build service for Expo apps",
+  title: "Axe Build — self-hosted Expo Android builds",
+  description:
+    "A self-hosted alternative to Expo's cloud build service: Android APK/AAB builds, OTA updates and in-app notifications, all on your own machine.",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body
-        style={{
-          margin: 0,
-          fontFamily: "ui-sans-serif, system-ui, sans-serif",
-          background: "#0b0e14",
-          color: "#e6e6e6",
-          minHeight: "100vh",
-        }}
-      >
+      <body>
+        <SiteNav />
         {children}
       </body>
     </html>

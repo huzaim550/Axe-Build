@@ -1,6 +1,6 @@
 import fsp from "node:fs/promises";
 import Redis from "ioredis";
-import { db } from "@mybuild/db";
+import { db } from "@axebuild/db";
 import { isAuthorized, unauthorized } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";

@@ -14,11 +14,12 @@ const EXCLUDED = new Set([
   "dist",
   "build",
   "web-build",
+  "axe.json",
   "mybuild.json",
 ]);
 
 export async function packProject(projectDir: string): Promise<string> {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mybuild-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "axebuild-"));
   const tarPath = path.join(tmp, "project.tgz");
 
   await tar.create(

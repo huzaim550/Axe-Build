@@ -46,21 +46,15 @@ export function RetractButton({
   return (
     <>
       <button
+        className={`btn btn-sm${busy ? " btn-busy" : ""}`}
         onClick={retract}
         disabled={busy}
-        style={{
-          background: "transparent",
-          border: "1px solid #2a2f3a",
-          color: "#8a8f98",
-          borderRadius: 6,
-          padding: "4px 10px",
-          fontSize: 12,
-          cursor: busy ? "wait" : "pointer",
-        }}
+        title="Stop serving this to apps"
       >
-        {busy ? "…" : "Retract"}
+        {busy && <span className="spinner" />}
+        {busy ? "Retracting" : "Retract"}
       </button>
-      {error && <div style={{ color: "#ef4444", fontSize: 12 }}>{error}</div>}
+      {error && <div className="error-text">{error}</div>}
     </>
   );
 }

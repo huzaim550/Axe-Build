@@ -1,5 +1,5 @@
 import path from "node:path";
-import { db } from "@mybuild/db";
+import { db } from "@axebuild/db";
 
 /**
  * The update + APK endpoints are the only UNAUTHENTICATED routes besides

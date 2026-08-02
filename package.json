@@ -1,8 +1,8 @@
 {
-  "name": "mybuild",
+  "name": "axebuild",
   "private": true,
   "version": "0.1.0",
-  "description": "Self-hosted, localhost-only, Android-only Expo build service (EAS clone). Everything runs in Docker.",
+  "description": "Axe Build \u2014 a self-hosted alternative to Expo's cloud build service (EAS Build). Android APKs, OTA updates and in-app notifications, all in Docker on your own machine.",
   "packageManager": "pnpm@9.15.0",
   "engines": {
     "node": ">=20"

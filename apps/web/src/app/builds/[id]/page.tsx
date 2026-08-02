@@ -1,6 +1,8 @@
 import Link from "next/link";
-import { db } from "@mybuild/db";
+import { db } from "@axebuild/db";
 import { token } from "@/lib/auth";
+import { fmtBytes, fmtDuration, statusClass } from "@/lib/format";
+import { DeleteBuildButton } from "../../delete-build-button";
 import { BuildConsole } from "./console";
 import { ReleaseButton } from "./release-button";
 
@@ -15,33 +17,71 @@ export default async function BuildPage({ params }: { params: Promise<{ id: stri
 
   if (!build) {
     return (
-      <main style={{ maxWidth: 960, margin: "0 auto", padding: "32px 16px" }}>
-        <p>Build not found.</p>
-        <Link href="/" style={{ color: "#3b82f6" }}>
-          ← back
-        </Link>
+      <main className="container">
+        <div className="card empty">
+          <h2>Build not found</h2>
+          <p>It may have been deleted.</p>
+          <p style={{ marginTop: 16 }}>
+            <Link className="btn" href="/">
+              Back to builds
+            </Link>
+          </p>
+        </div>
       </main>
     );
   }
 
+  // A queued or running build has nothing to download, promote or delete yet,
+  // and an empty "Actions" card is worse than no card.
+  const finished = build.status !== "queued" && build.status !== "running";
+
   return (
-    <main style={{ maxWidth: 960, margin: "0 auto", padding: "32px 16px" }}>
-      <Link href="/" style={{ color: "#3b82f6", fontSize: 13 }}>
+    <main className="container">
+      <Link href="/" className="faint" style={{ fontSize: 13 }}>
         ← all builds
       </Link>
-      <h1 style={{ fontSize: 20, marginTop: 8, marginBottom: 4 }}>
-        {build.project.name} — {build.buildType}/{build.profile}
-      </h1>
-      <p style={{ color: "#565c66", fontSize: 12, marginTop: 0, marginBottom: 8 }}>{build.id}</p>
 
-      {(build.versionName || build.runtimeVersion) && (
-        <p style={{ color: "#8a8f98", fontSize: 13, marginTop: 0, marginBottom: 24 }}>
-          v{build.versionName ?? "?"} (code {build.versionCode ?? "?"})
-          {build.runtimeVersion && <> · runtime {build.runtimeVersion}</>}
-          {build.androidPackage && <> · {build.androidPackage}</>}
-        </p>
-      )}
+      <div className="page-head" style={{ marginTop: 10 }}>
+        <div>
+          <h1>{build.project.name}</h1>
+          <p className="mono" style={{ fontSize: 12.5 }}>
+            {build.id}
+          </p>
+        </div>
+        <div className="row">
+          <span className={statusClass(build.status)}>{build.status}</span>
+          {build.releasedApk || build.releasedUpdate ? (
+            <span className="pill pill-live">
+              live
+              {build.releasedApk && build.releasedUpdate
+                ? " APK+OTA"
+                : build.releasedApk
+                  ? " APK"
+                  : " OTA"}
+            </span>
+          ) : null}
+        </div>
+      </div>
 
+      <div className="card">
+        <div className="meta-grid">
+          <Meta label="Type" value={`${build.buildType} / ${build.profile}`} />
+          <Meta label="ABI" value={build.buildType === "update" ? "—" : build.abi} />
+          <Meta
+            label="Version"
+            value={build.versionName ? `${build.versionName} (${build.versionCode ?? "?"})` : "—"}
+          />
+          <Meta label="Runtime" value={build.runtimeVersion ?? "—"} />
+          <Meta label="Package" value={build.androidPackage ?? "—"} />
+          <Meta label="Channel" value={build.channel} />
+          <Meta label="Took" value={fmtDuration(build.startedAt, build.finishedAt)} />
+          <Meta label="Size" value={fmtBytes(build.sizeBytes)} />
+        </div>
+      </div>
+
+      <div className="section-head">
+        <h2>Console</h2>
+      </div>
       <BuildConsole
         buildId={build.id}
         token={token()}
@@ -49,34 +89,59 @@ export default async function BuildPage({ params }: { params: Promise<{ id: stri
         buildType={build.buildType}
       />
 
-      {build.status === "success" && build.artifactPath && (
-        <p style={{ marginTop: 16 }}>
-          <a
-            href={`/api/builds/${build.id}/artifact?token=${encodeURIComponent(token())}`}
-            style={{ color: "#3b82f6" }}
-          >
-            Download artifact
-          </a>
+      {build.error && (
+        <p className="error-text" style={{ marginTop: 12 }}>
+          {build.error}
         </p>
       )}
 
-      {build.status === "success" && (
-        <ReleaseButton
-          buildId={build.id}
-          token={token()}
-          hasApk={Boolean(build.artifactPath)}
-          hasUpdate={Boolean(build.updateDirPath)}
-          releasedApk={build.releasedApk}
-          releasedUpdate={build.releasedUpdate}
-        />
-      )}
+      {finished && (
+        <>
+          <div className="section-head">
+            <h2>Actions</h2>
+          </div>
+          <div className="card">
+            <div className="row">
+              {build.status === "success" && build.artifactPath && (
+                <a
+                  className="btn"
+                  href={`/api/builds/${build.id}/artifact?token=${encodeURIComponent(token())}`}
+                >
+                  Download artifact
+                </a>
+              )}
+              {build.status === "success" && (
+                <ReleaseButton
+                  buildId={build.id}
+                  token={token()}
+                  hasApk={Boolean(build.artifactPath)}
+                  hasUpdate={Boolean(build.updateDirPath)}
+                  releasedApk={build.releasedApk}
+                  releasedUpdate={build.releasedUpdate}
+                />
+              )}
+              <span className="spacer" />
+              <DeleteBuildButton buildId={build.id} token={token()} size="md" onDeleted="home" />
+            </div>
 
-      {build.status === "success" && !build.runtimeVersion && build.updateDirPath && (
-        <p style={{ color: "#f59e0b", fontSize: 13, marginTop: 12 }}>
-          This build has an update bundle but no runtimeVersion, so it can never be matched to an
-          installed app. Set <code>expo.runtimeVersion</code> in app.json and rebuild.
-        </p>
+            {build.status === "success" && !build.runtimeVersion && build.updateDirPath && (
+              <p className="note note-warn" style={{ marginTop: 14 }}>
+                This build has an update bundle but no runtimeVersion, so it can never be matched
+                to an installed app. Set <code>expo.runtimeVersion</code> in app.json and rebuild.
+              </p>
+            )}
+          </div>
+        </>
       )}
     </main>
+  );
+}
+
+function Meta({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="meta-label">{label}</div>
+      <div className="meta-value">{value}</div>
+    </div>
   );
 }

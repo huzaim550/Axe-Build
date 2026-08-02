@@ -18,6 +18,10 @@ CMDLINE_TOOLS_VERSION="${CMDLINE_TOOLS_VERSION:-11076708}"
 # required because the New Architecture compiles C++ in the app build.
 # Older projects pinning API 35 / cmake 3.22.1 auto-install them at build time.
 ANDROID_SDK_PACKAGES="${ANDROID_SDK_PACKAGES:-platform-tools platforms;android-36 build-tools;36.0.0 ndk;27.1.12297006 cmake;3.30.5}"
+# Frozen name (the project used to be called mybuild): this marker lives in the
+# android-sdk volume, and renaming it would make an existing install re-download
+# several GB of SDK. Same reason applies to mybuild.init.gradle below and the
+# volume names in docker-compose.yml.
 SDK_MANIFEST="$ANDROID_HOME/.mybuild-sdk-manifest"
 
 if [ ! -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then

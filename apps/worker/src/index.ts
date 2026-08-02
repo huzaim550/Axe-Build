@@ -4,7 +4,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { Worker, type Job } from "bullmq";
 import Redis from "ioredis";
-import { db } from "@mybuild/db";
+import { db } from "@axebuild/db";
 import { AndroidRunner } from "./android.js";
 import type { BuildSpec } from "./runner.js";
 import { writeUpdateManifest } from "./updates.js";

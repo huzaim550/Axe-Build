@@ -66,145 +66,108 @@ export function ComposeForm({
     }
   }
 
-  const field: React.CSSProperties = {
-    width: "100%",
-    background: "#0f131b",
-    border: "1px solid #2a2f3a",
-    borderRadius: 6,
-    color: "#e6e6e6",
-    padding: "8px 10px",
-    fontSize: 14,
-    fontFamily: "inherit",
-    boxSizing: "border-box",
-  };
-  const label: React.CSSProperties = {
-    display: "block",
-    color: "#8a8f98",
-    fontSize: 12,
-    marginBottom: 4,
-  };
-
   if (projects.length === 0) {
     return (
-      <p style={{ color: "#8a8f98" }}>
-        No projects yet — build one first, then you can send notifications to it.
-      </p>
+      <div className="card empty">
+        <h2>No apps yet</h2>
+        <p>Build a project first — notifications are sent to one app at a time.</p>
+      </div>
     );
   }
 
   return (
-    <form
-      onSubmit={send}
-      style={{
-        background: "#111620",
-        border: "1px solid #1a1f29",
-        borderRadius: 8,
-        padding: 16,
-        display: "grid",
-        gap: 12,
-        maxWidth: 620,
-      }}
-    >
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-        <div style={{ flex: "1 1 200px" }}>
-          <label style={label}>App</label>
-          <select style={field} value={slug} onChange={(e) => setSlug(e.target.value)}>
+    <form className="card stack" onSubmit={send} style={{ maxWidth: 700 }}>
+      <div className="form-grid">
+        <label className="field">
+          <span className="field-label">App</span>
+          <select className="select" value={slug} onChange={(e) => setSlug(e.target.value)}>
             {projects.map((p) => (
               <option key={p.slug} value={p.slug}>
                 {p.name}
               </option>
             ))}
           </select>
-        </div>
-        <div style={{ flex: "0 1 140px" }}>
-          <label style={label}>Level</label>
-          <select style={field} value={level} onChange={(e) => setLevel(e.target.value)}>
+        </label>
+
+        <label className="field">
+          <span className="field-label">Level</span>
+          <select className="select" value={level} onChange={(e) => setLevel(e.target.value)}>
             <option value="info">info</option>
             <option value="warning">warning</option>
           </select>
-        </div>
-        <div style={{ flex: "0 1 160px" }}>
-          <label style={label}>Channel</label>
+        </label>
+
+        <label className="field">
+          <span className="field-label">Channel</span>
           <input
-            style={field}
+            className="input"
             value={channel}
             onChange={(e) => setChannel(e.target.value)}
             placeholder="production"
           />
-        </div>
+        </label>
       </div>
 
-      <div>
-        <label style={label}>Title</label>
+      <label className="field">
+        <span className="field-label">Title</span>
         <input
-          style={field}
+          className="input"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           maxLength={120}
           placeholder="New films added"
           required
         />
-      </div>
+      </label>
 
-      <div>
-        <label style={label}>Message</label>
+      <label className="field">
+        <span className="field-label">Message</span>
         <textarea
-          style={{ ...field, minHeight: 90, resize: "vertical" }}
+          className="textarea"
           value={body}
           onChange={(e) => setBody(e.target.value)}
           maxLength={1000}
           placeholder="Twelve new titles landed this week — open Movies to see them."
           required
         />
-        <div style={{ color: "#565c66", fontSize: 12, marginTop: 4 }}>{body.length}/1000</div>
-      </div>
+        <span className="field-hint">{body.length}/1000</span>
+      </label>
 
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-        <div style={{ flex: "1 1 260px" }}>
-          <label style={label}>Link (optional, http/https)</label>
+      <div className="form-grid">
+        <label className="field">
+          <span className="field-label">Link (optional, http/https)</span>
           <input
-            style={field}
+            className="input"
+            type="url"
             value={linkUrl}
             onChange={(e) => setLinkUrl(e.target.value)}
             placeholder="https://…"
-            type="url"
           />
-        </div>
-        <div style={{ flex: "0 1 220px" }}>
-          <label style={label}>Expires (optional)</label>
+        </label>
+
+        <label className="field">
+          <span className="field-label">Expires (optional)</span>
           <input
-            style={field}
+            className="input"
+            type="datetime-local"
             value={expiresAt}
             onChange={(e) => setExpiresAt(e.target.value)}
-            type="datetime-local"
           />
-        </div>
+        </label>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <button
-          type="submit"
-          disabled={busy}
-          style={{
-            background: "#3b82f6",
-            border: "none",
-            borderRadius: 6,
-            color: "#fff",
-            padding: "9px 18px",
-            fontSize: 14,
-            fontWeight: 600,
-            cursor: busy ? "wait" : "pointer",
-          }}
-        >
-          {busy ? "Sending…" : "Send"}
+      <div className="row">
+        <button type="submit" className={`btn btn-primary${busy ? " btn-busy" : ""}`} disabled={busy}>
+          {busy && <span className="spinner" />}
+          {busy ? "Sending" : "Send"}
         </button>
-        {sent && <span style={{ color: "#22c55e", fontSize: 13 }}>● sent</span>}
-        {error && <span style={{ color: "#ef4444", fontSize: 13 }}>{error}</span>}
+        {sent && <span className="ok-text">Sent — apps will pick it up on next launch.</span>}
+        {error && <span className="error-text">{error}</span>}
       </div>
 
-      <p style={{ color: "#565c66", fontSize: 12, margin: 0 }}>
-        Apps pick this up the next time they are opened or brought to the foreground —
-        it is a poll, not a push, so a closed app shows nothing until it is next launched.
+      <p className="note">
+        This is a pull channel, not a push: apps fetch it when they open or come back to the
+        foreground, so a closed app shows nothing until it is next launched.
       </p>
     </form>
   );

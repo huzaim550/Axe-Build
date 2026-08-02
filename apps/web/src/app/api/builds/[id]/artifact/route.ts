@@ -2,7 +2,7 @@ import { createReadStream } from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
-import { db } from "@mybuild/db";
+import { db } from "@axebuild/db";
 import { isAuthorized, unauthorized } from "@/lib/auth";
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {

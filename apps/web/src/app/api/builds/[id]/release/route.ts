@@ -1,4 +1,4 @@
-import { db } from "@mybuild/db";
+import { db } from "@axebuild/db";
 import { isAuthorized, unauthorized } from "@/lib/auth";
 
 /**

@@ -1,5 +1,5 @@
 {
-  "name": "@mybuild/db",
+  "name": "@axebuild/db",
   "version": "0.1.0",
   "private": true,
   "main": "dist/index.js",

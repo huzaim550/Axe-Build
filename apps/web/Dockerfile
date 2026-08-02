@@ -24,9 +24,9 @@ COPY --chown=node:node apps/web apps/web
 # Dummy URL so PrismaClient can be constructed during `next build`;
 # the real DATABASE_URL comes from docker-compose at runtime.
 ENV DATABASE_URL="file:/tmp/build-placeholder.db"
-RUN pnpm --filter @mybuild/db generate \
-    && pnpm --filter @mybuild/db build \
-    && pnpm --filter @mybuild/web build
+RUN pnpm --filter @axebuild/db generate \
+    && pnpm --filter @axebuild/db build \
+    && pnpm --filter @axebuild/web build
 
 ENV NODE_ENV=production
 EXPOSE 3000

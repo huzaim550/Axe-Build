@@ -16,10 +16,10 @@
 # Setup from scratch (no other tunnel on this machine):
 #
 #   cloudflared tunnel login
-#   cloudflared tunnel create mybuild-updates
-#   cloudflared tunnel route dns mybuild-updates updates.example.com
+#   cloudflared tunnel create axebuild-updates
+#   cloudflared tunnel route dns axebuild-updates updates.example.com
 #   cp cloudflared.example.yml ~/.cloudflared/config.yml   # then edit below
-#   cloudflared tunnel run mybuild-updates
+#   cloudflared tunnel run axebuild-updates
 #
 # ---------------------------------------------------------------------------
 # What stops the dashboard leaking
@@ -44,12 +44,12 @@
 # If / returns 200 and HTML, STOP and fix PUBLIC_HOSTNAME before going further.
 # ---------------------------------------------------------------------------
 
-tunnel: mybuild-updates
+tunnel: axebuild-updates
 credentials-file: /home/YOUR_USER/.cloudflared/YOUR_TUNNEL_ID.json
 
 ingress:
   - hostname: updates.example.com
-    # Where mybuild's web container is listening. Which value you need depends
+    # Where Axe Build's web container is listening. Which value you need depends
     # on where THIS cloudflared process runs:
     #   - on the same machine as Docker  -> http://localhost:3000
     #   - on any other machine on the LAN -> http://<server-lan-ip>:3000

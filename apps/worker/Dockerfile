@@ -47,8 +47,8 @@ RUN pnpm install
 
 COPY --chown=node:node packages/db packages/db
 COPY --chown=node:node apps/worker apps/worker
-RUN pnpm --filter @mybuild/db generate \
-    && pnpm --filter @mybuild/db build \
-    && pnpm --filter @mybuild/worker build
+RUN pnpm --filter @axebuild/db generate \
+    && pnpm --filter @axebuild/db build \
+    && pnpm --filter @axebuild/worker build
 
 ENTRYPOINT ["/repo/apps/worker/entrypoint.sh"]

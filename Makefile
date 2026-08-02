@@ -1,3 +1,4 @@
+# Axe Build — server lifecycle.
 # Container runtime is swappable: `make up DOCKER=podman` works too.
 DOCKER  ?= docker
 COMPOSE ?= $(DOCKER) compose

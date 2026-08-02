@@ -1,4 +1,4 @@
-# Using mybuild — day-to-day guide
+# Using Axe Build — day-to-day guide
 
 This assumes your server is already up (`docker compose up -d --build` / `make up` has run
 and the worker image finished building). This guide is just: how do I turn an Expo project
@@ -13,41 +13,41 @@ already has everything it needs inside its containers).
 cd android_app_builder/packages/cli
 npm install
 npm run build
-npm link            # gives you the global `build-cli` command
+npm link            # gives you the global `axe` command
 ```
 
 Check it worked:
 
 ```bash
-build-cli --help
+axe --help
 ```
 
-(If you don't want a global link, you can always run it as `node /path/to/android_app_builder/packages/cli/dist/index.js ...` instead of `build-cli`.)
+(If you don't want a global link, you can always run it as `node /path/to/android_app_builder/packages/cli/dist/index.js ...` instead of `axe`.)
 
 ## 1. One-time: point the CLI at your server
 
 ```bash
-build-cli login http://<server-ip>:3000 --token <LOCAL_TOKEN>
+axe login http://<server-ip>:3000 --token <LOCAL_TOKEN>
 ```
 
 - `<server-ip>` — your home server's LAN IP (e.g. `192.168.1.50`). Use `localhost` only if you're running the CLI on the server itself.
 - `<LOCAL_TOKEN>` — whatever you set for `LOCAL_TOKEN` when you started the server (defaults to `dev-local-token` if you didn't set one).
 
-This writes `~/.mybuild/config.json`. You only do this once per dev machine — every project reuses it.
+This writes `~/.axebuild/config.json`. You only do this once per dev machine — every project reuses it.
 
 ## 2. Per-project: link it to the server
 
 ```bash
 cd /path/to/your-expo-app     # the folder with package.json, App.tsx, app.json
-build-cli init
+axe init
 ```
 
-This creates a project on the server and writes a small `mybuild.json` file into your project root recording its slug. Commit it or gitignore it, your call — it has no secrets in it.
+This creates a project on the server and writes a small `axe.json` file into your project root recording its slug. Commit it or gitignore it, your call — it has no secrets in it.
 
 If you already created the project before (e.g. from another machine) and just want to link to it instead of making a duplicate:
 
 ```bash
-build-cli init --slug your-existing-project-slug
+axe init --slug your-existing-project-slug
 ```
 
 ## 3. Build an APK
@@ -55,7 +55,7 @@ build-cli init --slug your-existing-project-slug
 From inside the project folder:
 
 ```bash
-build-cli build --type apk --profile release
+axe build --type apk --profile release
 ```
 
 What you'll see:
@@ -118,8 +118,8 @@ Two different mechanisms, because they cover different kinds of change:
 Nothing is served to phones until you **release** it, so a green build is never automatically live:
 
 ```bash
-build-cli release <buildId>          # promote whatever that build produced
-build-cli release <buildId> --undo   # roll back
+axe release <buildId>          # promote whatever that build produced
+axe release <buildId> --undo   # roll back
 ```
 
 ### One-time setup for OTA
@@ -142,7 +142,7 @@ In your `app.json`:
 Then `npx expo install expo-updates`, and **build and install a fresh APK**:
 
 ```bash
-build-cli build --type apk --ota --release
+axe build --type apk --ota --release
 ```
 
 OTA can't bootstrap itself — the phone has to be running a binary that already knows the update URL.
@@ -152,7 +152,7 @@ OTA can't bootstrap itself — the phone has to be running a binary that already
 After that, a JS-only change ships without touching Gradle:
 
 ```bash
-build-cli build --type update --release
+axe build --type update --release
 ```
 
 Open the app twice: expo-updates downloads in the background on the first launch and applies on the second. That's standard expo-updates behaviour, not a quirk of this server.
@@ -210,10 +210,10 @@ A LAN URL only works while the phone is on your wifi. To update apps anywhere, p
 build server through a Cloudflare tunnel and point the app at the public hostname:
 
 ```bash
-cloudflared tunnel create mybuild-updates
-cloudflared tunnel route dns mybuild-updates updates.example.com
+cloudflared tunnel create axebuild-updates
+cloudflared tunnel route dns axebuild-updates updates.example.com
 cp cloudflared.example.yml ~/.cloudflared/config.yml    # then edit it
-cloudflared tunnel run mybuild-updates
+cloudflared tunnel run axebuild-updates
 ```
 
 In `cloudflared.example.yml`, point `service:` at wherever the web container listens — that is
@@ -272,6 +272,28 @@ curl -X POST http://<server-ip>:3000/api/notifications/<slug> \
 
 A `linkUrl` must be `http(s)` — both the server and the app refuse anything else, because the app
 hands that URL to the system browser.
+
+## 7. Deleting builds
+
+Every finished build has a **Delete** button — on the row in the builds table, and on the build's
+own page. It removes four things: the database row, the APK/AAB, the full build log, and the
+source tarball you uploaded. The response says how much disk that freed.
+
+- It asks twice. The first press turns into **Sure?** — this is the one control here that destroys
+  something a rebuild cannot give back for free.
+- A **queued or running** build cannot be deleted at all. The worker owns it until it finishes.
+- A **live** build (one that `/api/apps/:slug/latest` or the OTA manifest is currently serving)
+  refuses the first time and offers **Delete anyway**. Going through with it means installed apps
+  stop finding an update until you release another build.
+
+From a shell:
+
+```bash
+curl -X DELETE -H "authorization: Bearer $LOCAL_TOKEN" \
+  http://<server-ip>:3000/api/builds/<buildId>          # add ?force=1 for a live build
+```
+
+Bulk cleanup is still `make clean-cache` (caches only) and `make nuke` (everything).
 
 ## Timing expectations
 

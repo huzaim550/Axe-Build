@@ -1,12 +1,40 @@
-# Expo_Build_Tool_Local
+# Axe Build
 
-A local, open-source mini-clone of Expo Application Services (EAS):
+**A self-hosted alternative to Expo's cloud build service (EAS Build).** Point it at your own
+machine and get Android APKs, over-the-air updates and in-app notifications — no cloud account,
+no build queue, no per-build billing, no size limits but your own disk.
 
-- **Android only.** iOS is out of scope (needs macOS/Xcode).
+```
+   █████████
+  ███████▓▓█
+ ████████▓▓█        axe build --type apk
+ ████████▓▓█        ────────────────────
+  ███████▓▓█        self-hosted Expo Android builds
+   ██████▓▓█
+        █▓▓█
+        █▓▓█
+        ████
+```
+
+- **Android only.** iOS is out of scope (it needs macOS/Xcode).
+
 - **Home network only.** Single server, single user, one hardcoded token. The dashboard listens on port 3000 for your LAN — never port-forward it on your router. (Set `BIND_ADDR=127.0.0.1` to restrict it to the server machine itself.)
 - **Fully containerized.** The host needs **only Docker** (or Podman). Android SDK, JDK 17, Node, Gradle — all live inside containers and named volumes, never on the host. `docker compose down -v` leaves the machine exactly as it was.
 
-You run a small CLI inside an Expo project; it uploads the source (no `node_modules`) to the server; a worker container runs `npm ci` → `expo prebuild` → Gradle and gives you a downloadable APK/AAB.
+You run a small CLI inside an Expo project; it uploads the source (no `node_modules`) to the
+server; a worker container runs `npm ci` → `expo prebuild` → Gradle and gives you a downloadable
+APK/AAB. A dashboard shows every build live, promotes one to your users, sends them a
+notification, and deletes the ones you no longer want.
+
+### What it replaces
+
+| Expo (EAS) | Axe Build |
+|---|---|
+| `eas build` on Expo's builders | `axe build` on your machine |
+| EAS Update (`u.expo.dev`) | self-hosted expo-updates manifest |
+| Build minutes / plan limits | your CPU, your disk, no quota |
+| Expo account + project id | one server, one token |
+| — | in-app notifications, pulled by your app |
 
 ```
 CLI ─┐
@@ -55,15 +83,15 @@ The CLI needs Node 20+. Build it once:
 ```bash
 cd packages/cli
 npm install && npm run build
-npm link            # makes `build-cli` available globally (or use node dist/index.js)
+npm link            # makes `axe` available globally (or use node dist/index.js)
 ```
 
 Then, inside any Expo project:
 
 ```bash
-build-cli login http://<server-ip>:3000 --token dev-local-token
-build-cli init                          # creates the project, writes mybuild.json
-build-cli build --type apk --profile release
+axe login http://<server-ip>:3000 --token dev-local-token
+axe init                          # creates the project, writes axe.json
+axe build --type apk --profile release
 ```
 
 The CLI tars only your source (excludes `node_modules`, `.git`, `android/`, `ios/`, `.expo`), uploads it, and polls until the build finishes. The first build downloads all npm + Gradle dependencies and takes a long time (20–40 min on modest hardware); later builds reuse the `gradle-cache`/`npm-cache` volumes and are much faster.
@@ -81,8 +109,8 @@ x86 emulators or 32-bit phones, at the cost of a much longer build.
 
 Installed apps can be updated two ways: an **OTA update** (JS/assets only, self-hosted
 [expo-updates](https://docs.expo.dev/technical-specs/expo-updates-1/), ~90 s and no Gradle at all) or a
-new **APK** via a stable "latest" endpoint. Builds are never live until you promote them with
-`build-cli release <buildId>`. Full walkthrough in [GUIDE.md](GUIDE.md#5-shipping-updates-to-phones-that-already-have-the-app).
+new **APK** via a stable "latest" endpoint. Builds are never live until you promote them —
+the dashboard's **Release** button, or `axe release <buildId>`. Full walkthrough in [GUIDE.md](GUIDE.md#5-shipping-updates-to-phones-that-already-have-the-app).
 
 ### Publishing updates to the internet
 
@@ -122,6 +150,7 @@ hostname → one service and let the app do the filtering.
 | `GET /api/builds/:id` | build status + metadata |
 | `GET /api/builds/:id/artifact` | download APK/AAB (also accepts `?token=`) |
 | `POST /api/builds/:id/release` | `{ apk?, update? }` — promote/retire a build |
+| `DELETE /api/builds/:id` | delete a build + its artifacts, log and tarball (`?force=1` for a live one) |
 | `GET /api/updates/:slug/manifest` | **public** — Expo Updates protocol v1 manifest |
 | `GET /api/updates/:slug/assets` | **public** — one file from a released update bundle |
 | `GET /api/apps/:slug/latest` | **public** — current released APK version + download URL |
@@ -167,6 +196,11 @@ make nuke          # containers + images + state volumes gone, SDK volume kept
 make nuke-sdk      # same, but drop the Android SDK too → host fully pristine
 ```
 
+Individual builds are deleted from the dashboard (**Delete** on any finished build, or on its
+page) — that removes the row, the APK/AAB, the log and the uploaded source tarball, and reports
+how much disk it freed. A build that is currently released refuses to go without a second
+confirmation, because installed apps are being served from it.
+
 `make nuke` deliberately keeps the `android-sdk` volume so the next `make up` doesn't re-download several GB over your home connection. `make nuke-sdk` is the true full teardown: nothing remains on the machine except this source tree.
 
 ## Repo layout
@@ -180,8 +214,21 @@ apps/web/              Next.js dashboard (builds + notifications) + API routes
 apps/worker/           BullMQ consumer + Android build runner (+ Dockerfile,
                        entrypoint.sh bootstraps the SDK volume)
 packages/db/           Prisma schema + shared client (SQLite on db-data volume)
-packages/cli/          build-cli (login / init / build)
+packages/cli/          the `axe` CLI (login / init / build)
 ```
+
+### A note on the name
+
+This started life as `mybuild`, and a few internal identifiers still say so: the Compose project
+name, the `mybuild_*` volume names, `/data/db/mybuild.db`, and the marker files inside the SDK and
+artifact volumes. **Those are deliberately frozen.** Renaming a Compose project orphans every
+named volume — the build history, the artifacts and several GB of Android SDK would silently be
+replaced by empty ones on the next `make up`. If you are installing fresh, rename them to whatever
+you like before the first start; if you are upgrading, leave them alone.
+
+The CLI is friendlier about it: it writes `axe.json` and `~/.axebuild/config.json`, but still
+reads `mybuild.json` and `~/.mybuild/config.json` when they are what is there, so an existing
+project keeps building without being re-linked.
 
 ## Notes
 

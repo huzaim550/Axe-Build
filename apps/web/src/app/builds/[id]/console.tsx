@@ -1,14 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-
-const STATUS_COLORS: Record<string, string> = {
-  queued: "#8a8f98",
-  running: "#3b82f6",
-  success: "#22c55e",
-  failed: "#ef4444",
-  canceled: "#f59e0b",
-};
+import { statusClass } from "@/lib/format";
 
 // Ordered checkpoints emitted by the worker (apps/worker/src/android.ts). Progress
 // is "how far through this list has the log gotten" — a good enough proxy since
@@ -58,12 +51,18 @@ export function BuildConsole({
 }) {
   const [lines, setLines] = useState<string[]>([]);
   const [status, setStatus] = useState(initialStatus);
+  // Distinct from "no lines yet": a finished build with an empty log should say
+  // so rather than spin forever pretending something is on its way.
+  const [connected, setConnected] = useState(false);
   const logRef = useRef<HTMLPreElement>(null);
 
   useEffect(() => {
     const source = new EventSource(`/api/builds/${buildId}/logs?token=${encodeURIComponent(token)}`);
 
+    source.addEventListener("open", () => setConnected(true));
+
     source.addEventListener("log", (e) => {
+      setConnected(true);
       const line = JSON.parse((e as MessageEvent).data);
       setLines((prev) => (prev.length > 5000 ? [...prev.slice(-5000), line] : [...prev, line]));
     });
@@ -71,12 +70,14 @@ export function BuildConsole({
     source.addEventListener("done", (e) => {
       const newStatus = JSON.parse((e as MessageEvent).data);
       setStatus(newStatus);
+      setConnected(true);
       source.close();
     });
 
     source.onerror = () => {
       // Build already finished and the file-replay path closed the stream normally;
       // EventSource still fires "error" on a clean server-side close. Nothing to retry.
+      setConnected(true);
       source.close();
     };
 
@@ -88,49 +89,50 @@ export function BuildConsole({
   }, [lines]);
 
   const pct = progressFor(lines, status, buildType);
-  const barColor = status === "failed" ? "#ef4444" : status === "canceled" ? "#f59e0b" : "#3b82f6";
+  const running = status === "queued" || status === "running";
+  const fillClass = `progress-fill${
+    status === "failed"
+      ? " is-failed"
+      : status === "canceled"
+        ? " is-canceled"
+        : status === "success"
+          ? " is-success"
+          : " is-running"
+  }`;
 
   return (
-    <div>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-        <span style={{ color: STATUS_COLORS[status] ?? "#e6e6e6", fontSize: 14 }}>● {status}</span>
-        <div
-          style={{
-            flex: 1,
-            height: 8,
-            borderRadius: 4,
-            background: "#1a1f29",
-            overflow: "hidden",
-          }}
-        >
-          <div
-            style={{
-              width: `${pct}%`,
-              height: "100%",
-              background: barColor,
-              transition: "width 0.4s ease",
-            }}
-          />
+    <div className="card">
+      <div className="row" style={{ gap: 12, marginBottom: 14, flexWrap: "nowrap" }}>
+        <span className={statusClass(status)}>{status}</span>
+        <div className="progress">
+          <div className={fillClass} style={{ width: `${pct}%` }} />
         </div>
-        <span style={{ color: "#8a8f98", fontSize: 13, width: 36, textAlign: "right" }}>{pct}%</span>
+        <span className="progress-pct">{pct}%</span>
       </div>
 
-      <pre
-        ref={logRef}
-        style={{
-          background: "#05070a",
-          border: "1px solid #1a1f29",
-          borderRadius: 6,
-          padding: 16,
-          fontSize: 13,
-          lineHeight: 1.5,
-          maxHeight: 500,
-          overflow: "auto",
-          whiteSpace: "pre-wrap",
-          wordBreak: "break-all",
-        }}
-      >
-        {lines.length > 0 ? lines.join("\n") : "Waiting for log output..."}
+      <div className="log-head">
+        {running && <span className="spinner" />}
+        <span>
+          {lines.length > 0
+            ? `${lines.length} line${lines.length === 1 ? "" : "s"}`
+            : connected
+              ? "no output"
+              : "connecting"}
+        </span>
+        {running && <span className="faint">· streaming live</span>}
+      </div>
+
+      <pre className="log" ref={logRef}>
+        {lines.length > 0 ? (
+          lines.join("\n")
+        ) : connected ? (
+          <span className="faint">Nothing was logged for this build.</span>
+        ) : (
+          <span className="loading-row">
+            <span className="spinner" />
+            Attaching to the build log…
+          </span>
+        )}
       </pre>
     </div>
   );

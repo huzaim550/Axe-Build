@@ -23,13 +23,13 @@ export function ReleaseButton({
   releasedUpdate: boolean;
 }) {
   const router = useRouter();
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const isLive = releasedApk || releasedUpdate;
 
-  async function send(body: { apk: boolean; update: boolean }) {
-    setBusy(true);
+  async function send(label: string, body: { apk: boolean; update: boolean }) {
+    setBusy(label);
     setError(null);
     try {
       const res = await fetch(`/api/builds/${buildId}/release`, {
@@ -45,59 +45,58 @@ export function ReleaseButton({
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
 
-  const button: React.CSSProperties = {
-    background: "#1a1f29",
-    border: "1px solid #2a2f3a",
-    color: "#e6e6e6",
-    borderRadius: 6,
-    padding: "6px 12px",
-    fontSize: 13,
-    cursor: busy ? "wait" : "pointer",
+  /** One button, with its own busy state — several can be on screen at once. */
+  const Button = ({
+    label,
+    primary,
+    body,
+  }: {
+    label: string;
+    primary?: boolean;
+    body: { apk: boolean; update: boolean };
+  }) => {
+    const isBusy = busy === label;
+    return (
+      <button
+        className={`btn${primary ? " btn-primary" : ""}${isBusy ? " btn-busy" : ""}`}
+        disabled={busy !== null}
+        onClick={() => void send(label, body)}
+      >
+        {isBusy && <span className="spinner" />}
+        {isBusy ? "Working" : label}
+      </button>
+    );
   };
 
+  // Nothing to promote: an OTA-less build whose artifact was never produced.
+  if (!isLive && !hasApk && !hasUpdate) return null;
+
   return (
-    <div style={{ marginTop: 16 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        {isLive ? (
-          <>
-            <span style={{ color: "#22c55e", fontSize: 13 }}>
-              ● live{releasedApk && releasedUpdate ? " (APK + OTA)" : releasedApk ? " (APK)" : " (OTA)"}
-            </span>
-            <button
-              style={button}
-              disabled={busy}
-              onClick={() => send({ apk: false, update: false })}
-            >
-              Unrelease
-            </button>
-          </>
-        ) : (
-          <>
-            <button
-              style={{ ...button, borderColor: "#3b82f6", color: "#3b82f6" }}
-              disabled={busy || (!hasApk && !hasUpdate)}
-              onClick={() => send({ apk: hasApk, update: hasUpdate })}
-            >
-              Release{hasApk && hasUpdate ? " (APK + OTA)" : hasApk ? " APK" : hasUpdate ? " OTA" : ""}
-            </button>
-            {hasApk && hasUpdate && (
-              <>
-                <button style={button} disabled={busy} onClick={() => send({ apk: true, update: false })}>
-                  APK only
-                </button>
-                <button style={button} disabled={busy} onClick={() => send({ apk: false, update: true })}>
-                  OTA only
-                </button>
-              </>
-            )}
-          </>
-        )}
-      </div>
-      {error && <p style={{ color: "#ef4444", fontSize: 13 }}>{error}</p>}
-    </div>
+    <>
+      {isLive ? (
+        <Button label="Unrelease" body={{ apk: false, update: false }} />
+      ) : (
+        <>
+          <Button
+            label={`Release${
+              hasApk && hasUpdate ? " APK + OTA" : hasApk ? " APK" : hasUpdate ? " OTA" : ""
+            }`}
+            primary
+            body={{ apk: hasApk, update: hasUpdate }}
+          />
+          {hasApk && hasUpdate && (
+            <>
+              <Button label="APK only" body={{ apk: true, update: false }} />
+              <Button label="OTA only" body={{ apk: false, update: true }} />
+            </>
+          )}
+        </>
+      )}
+      {error && <span className="error-text">{error}</span>}
+    </>
   );
 }

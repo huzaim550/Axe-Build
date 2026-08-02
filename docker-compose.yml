@@ -1,4 +1,4 @@
-# Self-hosted Expo Android build service — localhost only, fully containerized.
+# Axe Build — self-hosted Expo Android build service, localhost only, fully containerized.
 #
 # Machine safety:
 #   - No privileged mode, no docker socket mount, no Docker-in-Docker.
@@ -8,6 +8,11 @@
 #
 # Works with `docker compose` and `podman compose` alike.
 
+# Frozen on purpose. The Compose project name prefixes every named volume
+# (mybuild_db-data, mybuild_android-sdk, ...), so renaming it here would point a
+# running install at empty volumes: build history gone, artifacts gone, and
+# several GB of Android SDK downloaded again. Renaming is safe only before the
+# very first `make up`.
 name: mybuild
 
 services:
@@ -22,7 +27,7 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
-    image: mybuild-web
+    image: axebuild-web
     restart: unless-stopped
     depends_on:
       - redis
@@ -50,13 +55,16 @@ services:
     volumes:
       - db-data:/data/db
       - uploads:/data/uploads
-      - artifacts:/data/artifacts:ro
+      # Writable, not :ro — deleting a build from the dashboard removes its
+      # artifact directory here. The worker is still the only thing that
+      # *writes* build output; the web app only ever serves it or deletes it.
+      - artifacts:/data/artifacts
 
   worker:
     build:
       context: .
       dockerfile: apps/worker/Dockerfile
-    image: mybuild-worker
+    image: axebuild-worker
     restart: unless-stopped
     depends_on:
       - redis

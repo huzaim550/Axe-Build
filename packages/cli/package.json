@@ -1,8 +1,9 @@
 {
-  "name": "@mybuild/cli",
+  "name": "@axebuild/cli",
   "version": "0.1.0",
   "private": true,
   "bin": {
+    "axe": "dist/index.js",
     "build-cli": "dist/index.js"
   },
   "scripts": {

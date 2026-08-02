@@ -14,12 +14,14 @@ import { packProject } from "./pack.js";
 const program = new Command();
 
 program
-  .name("build-cli")
-  .description("Upload an Expo project to your local mybuild server and get an Android APK/AAB back");
+  .name("axe")
+  .description(
+    "Axe Build — upload an Expo project to your own build server and get an Android APK/AAB back",
+  );
 
 program
   .command("login")
-  .description("Save the server URL + token to ~/.mybuild/config.json")
+  .description("Save the server URL + token to ~/.axebuild/config.json")
   .argument("<url>", "server URL, e.g. http://localhost:3000")
   .option("--token <token>", "API token (LOCAL_TOKEN of the server)", "dev-local-token")
   .action((url: string, opts: { token: string }) => {
@@ -29,7 +31,7 @@ program
 
 program
   .command("init")
-  .description("Create/link a project on the server and write mybuild.json here")
+  .description("Create/link a project on the server and write axe.json here")
   .option("--name <name>", "project name (default: current directory name)")
   .option("--slug <slug>", "link an existing project instead of creating one")
   .action(async (opts: { name?: string; slug?: string }) => {
@@ -45,7 +47,7 @@ program
     const name = opts.name ?? path.basename(cwd);
     const project = await createProject(cfg, name);
     saveProjectConfig(cwd, { projectSlug: project.slug });
-    console.log(`Created project '${project.name}' (slug: ${project.slug}). Wrote mybuild.json.`);
+    console.log(`Created project '${project.name}' (slug: ${project.slug}). Wrote axe.json.`);
   });
 
 program
