@@ -44,7 +44,7 @@ export class AndroidRunner implements Runner {
     yield `    version=${meta.versionName ?? "?"} versionCode=${meta.versionCode ?? "?"} ` +
       `runtimeVersion=${meta.runtimeVersion ?? "?"} package=${meta.androidPackage ?? "?"}`;
     if (!meta.runtimeVersion) {
-      yield `    note: no runtimeVersion in app config — OTA updates need one (see GUIDE.md)`;
+      yield `    note: no runtimeVersion in app config — OTA updates need one (see DOCS.md)`;
     }
 
     // OTA bundle. `update` builds stop here: a JS-only change needs no native

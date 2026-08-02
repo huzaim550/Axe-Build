@@ -16,8 +16,10 @@ no build queue, no per-build billing, no size limits but your own disk.
         ████
 ```
 
-- **Android only.** iOS is out of scope (it needs macOS/Xcode).
+**📖 [Full documentation](DOCS.md)** — setup, adding apps, the CLI end to end, OTA updates,
+notifications, API reference and troubleshooting.
 
+- **Android only.** iOS is out of scope (it needs macOS/Xcode).
 - **Home network only.** Single server, single user, one hardcoded token. The dashboard listens on port 3000 for your LAN — never port-forward it on your router. (Set `BIND_ADDR=127.0.0.1` to restrict it to the server machine itself.)
 - **Fully containerized.** The host needs **only Docker** (or Podman). Android SDK, JDK 17, Node, Gradle — all live inside containers and named volumes, never on the host. `docker compose down -v` leaves the machine exactly as it was.
 
@@ -86,7 +88,7 @@ npm install && npm run build
 npm link            # makes `axe` available globally (or use node dist/index.js)
 ```
 
-Then, inside any Expo project:
+Then, inside any Expo project (each step is explained in [DOCS.md](DOCS.md#6-add-your-first-app)):
 
 ```bash
 axe login http://<server-ip>:3000 --token dev-local-token
@@ -110,7 +112,7 @@ x86 emulators or 32-bit phones, at the cost of a much longer build.
 Installed apps can be updated two ways: an **OTA update** (JS/assets only, self-hosted
 [expo-updates](https://docs.expo.dev/technical-specs/expo-updates-1/), ~90 s and no Gradle at all) or a
 new **APK** via a stable "latest" endpoint. Builds are never live until you promote them —
-the dashboard's **Release** button, or `axe release <buildId>`. Full walkthrough in [GUIDE.md](GUIDE.md#5-shipping-updates-to-phones-that-already-have-the-app).
+the dashboard's **Release** button, or `axe release <buildId>`. Full walkthrough in [DOCS.md](DOCS.md#10-over-the-air-updates).
 
 ### Publishing updates to the internet
 

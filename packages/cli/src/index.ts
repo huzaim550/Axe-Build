@@ -112,7 +112,7 @@ program
           console.log(`Released to '${r.channel}': ${describeRelease(r)}`);
         } else {
           console.log("");
-          console.log(`Not live yet. Promote it with:  build-cli release ${buildId}`);
+          console.log(`Not live yet. Promote it with:  axe release ${buildId}`);
         }
         return;
       }
