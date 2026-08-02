@@ -126,11 +126,37 @@ hostname → one service and let the app do the filtering.
 | `GET /api/updates/:slug/assets` | **public** — one file from a released update bundle |
 | `GET /api/apps/:slug/latest` | **public** — current released APK version + download URL |
 | `GET /api/apps/:slug/latest/download` | **public** — that APK |
+| `GET /api/notifications/:slug` | **public** — live in-app notifications (`?channel=`, `?since=`) |
+| `POST /api/notifications/:slug` | `{ title, body, linkUrl?, level?, channel?, expiresAt? }` — send one |
+| `DELETE /api/notifications/:slug/:id` | retract one (kept in the DB, stops being served) |
 | `GET /api/health` | **public** — liveness |
 
-The four update routes are unauthenticated because an app installed on a phone cannot carry
+The public routes are unauthenticated because an app installed on a phone cannot carry
 `LOCAL_TOKEN`, and embedding it in a published APK would be worse. They are read-only; everything
 that changes state still needs the token. One more reason not to port-forward 3000.
+
+Note that `/api/notifications/:slug` answers both a device's poll (GET) and the dashboard's send
+(POST) on one path. On the public hostname the middleware allows **GET and HEAD only**, for every
+public route — so the write half is unreachable there even before the token check runs.
+
+## Notifications
+
+`/notifications` on the dashboard composes a message and sends it to one project. Installed apps
+poll for it and show it in their own inbox; nothing is pushed to a device, there is no device
+registry, and the server never learns who has the app installed. The trade-off is that a closed
+app sees nothing until it is next opened — real push would mean Firebase, a device token, a
+native module in the app, and a new APK for every user to install by hand.
+
+`Retract` stops a message being served to apps that have not fetched it yet. It cannot remove a
+copy from a device that already has it.
+
+From a shell instead of the dashboard:
+
+```bash
+curl -X POST http://<server>:3000/api/notifications/xtream-player-app \
+  -H "authorization: Bearer $LOCAL_TOKEN" -H 'content-type: application/json' \
+  -d '{"title":"New films added","body":"Twelve new titles landed this week."}'
+```
 
 ## Housekeeping
 
@@ -149,7 +175,8 @@ make nuke-sdk      # same, but drop the Android SDK too → host fully pristine
 docker-compose.yml     redis + web + worker, named volumes, resource limits
 Makefile               up / down / logs / nuke / nuke-sdk / clean-cache
 scripts/nuke.sh        full teardown (keeps android-sdk unless --sdk)
-apps/web/              Next.js dashboard + API routes (+ Dockerfile)
+apps/web/              Next.js dashboard (builds + notifications) + API routes
+                       (+ Dockerfile)
 apps/worker/           BullMQ consumer + Android build runner (+ Dockerfile,
                        entrypoint.sh bootstraps the SDK volume)
 packages/db/           Prisma schema + shared client (SQLite on db-data volume)

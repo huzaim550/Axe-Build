@@ -8,4 +8,4 @@ export function db(): PrismaClient {
   return client;
 }
 
-export type { Project, Build, Keystore, Prisma } from "@prisma/client";
+export type { Project, Build, Keystore, Notification, Prisma } from "@prisma/client";

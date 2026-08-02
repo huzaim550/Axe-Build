@@ -231,10 +231,47 @@ Verify the lockdown right after you set it up:
 curl -s -o /dev/null -w '%{http_code}\n' https://updates.example.com/            # expect 404
 curl -s -o /dev/null -w '%{http_code}\n' https://updates.example.com/api/builds  # expect 404
 curl -s -o /dev/null -w '%{http_code}\n' https://updates.example.com/api/health  # expect 200
+
+# Devices may read notifications through the tunnel, but never write one:
+curl -s -o /dev/null -w '%{http_code}\n' \
+  https://updates.example.com/api/notifications/<slug>          # expect 200
+curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+  https://updates.example.com/api/notifications/<slug>          # expect 404
 ```
 
 Switching to HTTPS also avoids a real trap: Expo release builds set `usesCleartextTraffic` to
 false, so a plain `http://` update URL is silently blocked in production builds.
+
+## 6. Sending a notification to installed apps
+
+Open `http://<server-ip>:3000/notifications`, pick the app, type a title and a message, press
+**Send**. That is the whole flow — no build, no release, no OTA.
+
+Apps **pull** these: the app asks `GET /api/notifications/<slug>` when it starts and when it
+comes back to the foreground (rate-limited to one request every five minutes), and shows what
+comes back in its own inbox. Consequences worth knowing before you use it:
+
+- A **closed app shows nothing** until someone opens it. This is not a tray notification; making
+  it one would need Firebase, a device token, a native module and a new APK for every user.
+- **Retract** stops a message being served to apps that have not fetched it yet. Anyone whose app
+  already downloaded it keeps their copy — nothing can reach into a phone and delete it.
+- **Expiry** is the cleaner tool for anything time-bound ("maintenance tonight at 9"): set it and
+  the message stops showing itself.
+- The **channel** field must match the channel the app is on (`production` unless you changed it),
+  otherwise nobody sees it.
+- Apps only ever see the newest 50 live messages. Older ones stay in the database and on the
+  dashboard.
+
+Same thing from a shell:
+
+```bash
+curl -X POST http://<server-ip>:3000/api/notifications/<slug> \
+  -H "authorization: Bearer $LOCAL_TOKEN" -H 'content-type: application/json' \
+  -d '{"title":"Maintenance tonight","body":"The server restarts at 21:00.","level":"warning"}'
+```
+
+A `linkUrl` must be `http(s)` — both the server and the app refuse anything else, because the app
+hands that URL to the system browser.
 
 ## Timing expectations
 

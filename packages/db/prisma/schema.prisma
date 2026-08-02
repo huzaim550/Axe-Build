@@ -8,12 +8,13 @@ datasource db {
 }
 
 model Project {
-  id        String    @id @default(cuid())
-  name      String
-  slug      String    @unique // used by the CLI to target this project
-  createdAt DateTime  @default(now())
-  builds    Build[]
-  keystore  Keystore?
+  id            String         @id @default(cuid())
+  name          String
+  slug          String         @unique // used by the CLI to target this project
+  createdAt     DateTime       @default(now())
+  builds        Build[]
+  keystore      Keystore?
+  notifications Notification[]
 }
 
 model Build {
@@ -56,6 +57,40 @@ model Build {
   releasedUpdate Boolean @default(false) // serves the OTA manifest endpoint
 
   @@index([projectId, channel])
+}
+
+/// A message the dashboard sends to installed apps.
+///
+/// This is a *pull* channel, not push: there is no device registry and nothing
+/// is ever sent to a phone. Apps poll GET /api/notifications/<slug>, so the
+/// server never learns who installed it, and nothing here needs Firebase, a
+/// device token, or a native module in the app.
+model Notification {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id])
+
+  title   String
+  body    String
+  /// Optional "learn more" target. Opened in the system browser by the app,
+  /// so it must be http(s) — the app refuses anything else.
+  linkUrl String?
+  /// info | warning — the app colours the banner from this and nothing more.
+  level   String  @default("info")
+
+  /// Matches the release channel the app is on, so a beta announcement never
+  /// reaches production installs.
+  channel String @default("production")
+
+  createdAt DateTime  @default(now())
+  /// After this instant the app stops showing it. Null means it stays until
+  /// retracted or aged out of the served window.
+  expiresAt DateTime?
+  /// The retract switch. Kept rather than deleted so the dashboard can still
+  /// show what was sent — but apps stop serving it immediately.
+  active    Boolean   @default(true)
+
+  @@index([projectId, channel, active])
 }
 
 // Phase 2 — present in the schema so the DB never needs a breaking migration,

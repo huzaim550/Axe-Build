@@ -20,14 +20,25 @@ import type { NextRequest } from "next/server";
  * the tunnel's own ingress rules. See README.md.
  */
 
-/** Everything expo-updates and the APK update check need, and nothing else. */
+/**
+ * Everything expo-updates, the APK update check and the notification inbox
+ * need, and nothing else.
+ *
+ * GET/HEAD only, without exception. /api/notifications/<slug> answers both a
+ * device's poll (GET) and the dashboard's send (POST) on one path, and only
+ * the first of those may ever be reachable from the internet. The POST is
+ * token-gated too — this is the second lock, not the only one.
+ */
 const PUBLIC_PATHS: RegExp[] = [
   /^\/api\/updates\/[^/]+\/manifest\/?$/,
   /^\/api\/updates\/[^/]+\/assets\/?$/,
   /^\/api\/apps\/[^/]+\/latest\/?$/,
   /^\/api\/apps\/[^/]+\/latest\/download\/?$/,
+  /^\/api\/notifications\/[^/]+\/?$/,
   /^\/api\/health\/?$/,
 ];
+
+const PUBLIC_METHODS = new Set(["GET", "HEAD"]);
 
 function hostnameOf(value: string | null): string {
   if (!value) return "";
@@ -45,7 +56,7 @@ export function middleware(req: NextRequest) {
   if (host !== publicHostname) return NextResponse.next();
 
   const path = req.nextUrl.pathname;
-  if (PUBLIC_PATHS.some((re) => re.test(path))) {
+  if (PUBLIC_METHODS.has(req.method) && PUBLIC_PATHS.some((re) => re.test(path))) {
     return NextResponse.next();
   }
 

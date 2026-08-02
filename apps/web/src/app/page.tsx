@@ -50,7 +50,12 @@ export default async function Home() {
   return (
     <main style={{ maxWidth: 960, margin: "0 auto", padding: "32px 16px" }}>
       <AutoRefresh />
-      <h1 style={{ fontSize: 22, marginBottom: 4 }}>mybuild</h1>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+        <h1 style={{ fontSize: 22, marginBottom: 4 }}>mybuild</h1>
+        <Link href="/notifications" style={{ color: "#3b82f6", fontSize: 14 }}>
+          notifications →
+        </Link>
+      </div>
       <p style={{ color: "#8a8f98", marginTop: 0, marginBottom: 24 }}>
         Local Expo Android builds — {builds.length} recent build{builds.length === 1 ? "" : "s"}
       </p>
