@@ -2,7 +2,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { Command } from "commander";
-import { createProject, getBuild, releaseBuild, uploadBuild } from "./api.js";
+import { createProject, getBuild, listProjects, releaseBuild, uploadBuild } from "./api.js";
 import {
   loadGlobalConfig,
   loadProjectConfig,
@@ -38,13 +38,42 @@ program
     const cfg = loadGlobalConfig();
     const cwd = process.cwd();
 
+    const projects = await listProjects(cfg);
+
     if (opts.slug) {
+      if (!projects.some((p) => p.slug === opts.slug)) {
+        throw new Error(
+          `No project with slug '${opts.slug}' on ${cfg.url}.\n` +
+            (projects.length
+              ? `  Existing slugs: ${projects.map((p) => p.slug).join(", ")}`
+              : `  The server has no projects yet — run 'axe init' without --slug.`),
+        );
+      }
       saveProjectConfig(cwd, { projectSlug: opts.slug });
       console.log(`Linked to existing project '${opts.slug}'.`);
       return;
     }
 
     const name = opts.name ?? path.basename(cwd);
+
+    // The server resolves a slug collision by appending a random suffix, which
+    // silently forks a second project — builds land there while the installed
+    // app keeps polling the original slug. Catch it here, where we can still
+    // tell the two cases apart.
+    // Prefer the exact-slug match: with duplicates around, a name-only match can
+    // point at the fork rather than the original this folder should relink to.
+    const clash =
+      projects.find((p) => p.slug === slugify(name)) ?? projects.find((p) => p.name === name);
+    if (clash) {
+      throw new Error(
+        `Project '${clash.name}' (slug: ${clash.slug}) already exists on ${cfg.url}.\n` +
+          `  To link this folder to it:\n` +
+          `      axe init --slug ${clash.slug}\n` +
+          `  To create a separate project:\n` +
+          `      axe init --name <different-name>`,
+      );
+    }
+
     const project = await createProject(cfg, name);
     saveProjectConfig(cwd, { projectSlug: project.slug });
     console.log(`Created project '${project.name}' (slug: ${project.slug}). Wrote axe.json.`);
@@ -168,6 +197,17 @@ function describeRelease(r: {
   const roles = [r.releasedApk && "APK", r.releasedUpdate && "OTA"].filter(Boolean).join(" + ");
   const version = r.versionName ? ` v${r.versionName} (${r.versionCode ?? "?"})` : "";
   return `${roles || "nothing"}${version}`;
+}
+
+/** Mirrors the slug the server derives in POST /api/projects, minus its collision suffix. */
+function slugify(name: string): string {
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40) || "project"
+  );
 }
 
 /** expo prebuild is non-interactive on the worker; missing android.package can make it fail there. */

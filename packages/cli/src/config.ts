@@ -50,12 +50,27 @@ export function saveProjectConfig(cwd: string, cfg: ProjectConfig): void {
 }
 
 export function loadProjectConfig(cwd: string): ProjectConfig {
-  const found = firstExisting(
-    path.join(cwd, PROJECT_CONFIG),
-    path.join(cwd, LEGACY_PROJECT_CONFIG),
-  );
+  const current = path.join(cwd, PROJECT_CONFIG);
+  const legacy = path.join(cwd, LEGACY_PROJECT_CONFIG);
+  const found = firstExisting(current, legacy);
   if (!found) {
     throw new Error(`No ${PROJECT_CONFIG} in this directory. Run: axe init`);
   }
-  return JSON.parse(fs.readFileSync(found, "utf8"));
+  const cfg: ProjectConfig = JSON.parse(fs.readFileSync(found, "utf8"));
+
+  // Two config files pointing at different projects is silent disaster: builds
+  // go to the slug in axe.json while installed apps keep polling the one in
+  // mybuild.json, so a release looks green and nothing reaches a phone.
+  if (found === current && fs.existsSync(legacy)) {
+    const old: ProjectConfig = JSON.parse(fs.readFileSync(legacy, "utf8"));
+    if (old.projectSlug !== cfg.projectSlug) {
+      console.warn(
+        `warning: ${PROJECT_CONFIG} and ${LEGACY_PROJECT_CONFIG} disagree\n` +
+          `  (${cfg.projectSlug} vs ${old.projectSlug})\n` +
+          `  using ${PROJECT_CONFIG}. Delete ${LEGACY_PROJECT_CONFIG} once you have confirmed which is right.`,
+      );
+    }
+  }
+
+  return cfg;
 }

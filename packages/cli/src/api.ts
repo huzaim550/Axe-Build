@@ -18,6 +18,16 @@ async function request(cfg: GlobalConfig, path: string, init: RequestInit = {}):
   return body;
 }
 
+export interface ProjectSummary {
+  id: string;
+  name: string;
+  slug: string;
+}
+
+export function listProjects(cfg: GlobalConfig): Promise<ProjectSummary[]> {
+  return request(cfg, "/api/projects");
+}
+
 export function createProject(cfg: GlobalConfig, name: string) {
   return request(cfg, "/api/projects", {
     method: "POST",
