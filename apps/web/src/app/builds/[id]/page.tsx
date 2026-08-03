@@ -37,14 +37,14 @@ export default async function BuildPage({ params }: { params: Promise<{ id: stri
 
   return (
     <main className="container">
-      <Link href="/" className="faint" style={{ fontSize: 13 }}>
-        ← all builds
+      <Link href="/" className="back-link">
+        ← All builds
       </Link>
 
-      <div className="page-head" style={{ marginTop: 10 }}>
+      <div className="page-head">
         <div>
           <h1>{build.project.name}</h1>
-          <p className="mono" style={{ fontSize: 12.5 }}>
+          <p className="mono faint" style={{ fontSize: 12.5 }}>
             {build.id}
           </p>
         </div>
@@ -63,6 +63,9 @@ export default async function BuildPage({ params }: { params: Promise<{ id: stri
         </div>
       </div>
 
+      <div className="section-head" style={{ marginTop: 0 }}>
+        <h2>Overview</h2>
+      </div>
       <div className="card">
         <div className="meta-grid">
           <Meta label="Type" value={`${build.buildType} / ${build.profile}`} />

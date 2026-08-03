@@ -42,6 +42,9 @@ export default async function Notifications() {
         {liveCount > 0 && <span className="pill pill-live">{liveCount} live</span>}
       </div>
 
+      <div className="section-head" style={{ marginTop: 0 }}>
+        <h2>Compose</h2>
+      </div>
       <ComposeForm projects={projects} token={token()} />
 
       <div className="section-head">
@@ -54,64 +57,50 @@ export default async function Notifications() {
           <p>Anything you send above shows up here, with a way to take it back.</p>
         </div>
       ) : (
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>App</th>
-                <th>Message</th>
-                <th>Channel</th>
-                <th>State</th>
-                <th>Sent</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {sent.map((n) => {
-                const s = state(n);
-                return (
-                  <tr key={n.id}>
-                    <td className="cell-main">{n.project.name}</td>
-                    <td className="wrap-text" style={{ maxWidth: 420 }}>
-                      <div className="cell-main">{n.title}</div>
-                      <div className="dim" style={{ fontSize: 13 }}>
-                        {n.body}
-                      </div>
-                      {n.linkUrl && (
-                        <a
-                          className="cell-sub"
-                          href={n.linkUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          style={{ display: "inline-block", color: "var(--accent)" }}
-                        >
-                          {n.linkUrl}
-                        </a>
-                      )}
-                    </td>
-                    <td>
-                      <span className="tag">{n.channel}</span>
-                      <div className="cell-sub">{n.level}</div>
-                    </td>
-                    <td>
-                      <span className={s.className}>{s.label}</span>
-                      {n.expiresAt && (
-                        <div className="cell-sub">until {n.expiresAt.toLocaleString()}</div>
-                      )}
-                    </td>
-                    <td className="dim" title={n.createdAt.toLocaleString()}>
-                      {fmtAgo(n.createdAt)}
-                    </td>
-                    <td>
-                      {n.active && (
-                        <RetractButton slug={n.project.slug} id={n.id} token={token()} />
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="list">
+          {sent.map((n) => {
+            const s = state(n);
+            return (
+              <div className="list-row" key={n.id}>
+                <div className="row-body">
+                  <div className="row-title">
+                    {n.title}
+                    <span className={s.className}>{s.label}</span>
+                  </div>
+
+                  <div className="row-note dim">{n.body}</div>
+
+                  {n.linkUrl && (
+                    <div className="row-note">
+                      <a className="link mono" href={n.linkUrl} target="_blank" rel="noreferrer">
+                        {n.linkUrl}
+                      </a>
+                    </div>
+                  )}
+
+                  <div className="row-facts">
+                    <span>{n.project.name}</span>
+                    <span className="sep">·</span>
+                    <span>{n.channel}</span>
+                    <span className="sep">·</span>
+                    <span>{n.level}</span>
+                    <span className="sep">·</span>
+                    <span title={n.createdAt.toLocaleString()}>{fmtAgo(n.createdAt)}</span>
+                    {n.expiresAt && (
+                      <>
+                        <span className="sep">·</span>
+                        <span>until {n.expiresAt.toLocaleString()}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <div className="row-actions">
+                  {n.active && <RetractButton slug={n.project.slug} id={n.id} token={token()} />}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </main>

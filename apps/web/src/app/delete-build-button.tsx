@@ -19,12 +19,15 @@ export function DeleteBuildButton({
   token,
   onDeleted,
   size = "sm",
+  ghost = false,
 }: {
   buildId: string;
   token: string;
   /** Where to go afterwards. Default is a refresh, which is right for a list. */
   onDeleted?: "refresh" | "home";
   size?: "sm" | "md";
+  /** Borderless until hovered — for a list, where it repeats on every row. */
+  ghost?: boolean;
 }) {
   const router = useRouter();
   const [confirming, setConfirming] = useState(false);
@@ -58,7 +61,8 @@ export function DeleteBuildButton({
     }
   }
 
-  const cls = `btn btn-danger${size === "sm" ? " btn-sm" : ""}${busy ? " btn-busy" : ""}`;
+  const base = `btn${size === "sm" ? " btn-sm" : ""}`;
+  const cls = `${base} btn-danger${busy ? " btn-busy" : ""}`;
 
   if (busy) {
     return (
@@ -76,7 +80,7 @@ export function DeleteBuildButton({
           Delete anyway
         </button>
         <button
-          className={`btn${size === "sm" ? " btn-sm" : ""}`}
+          className={base}
           onClick={() => {
             setNeedsForce(false);
             setConfirming(false);
@@ -97,7 +101,7 @@ export function DeleteBuildButton({
           Sure?
         </button>
         <button
-          className={`btn${size === "sm" ? " btn-sm" : ""}`}
+          className={base}
           onClick={() => setConfirming(false)}
         >
           Cancel
@@ -109,7 +113,7 @@ export function DeleteBuildButton({
 
   return (
     <button
-      className={`btn${size === "sm" ? " btn-sm" : ""}`}
+      className={ghost ? `${base} btn-ghost` : base}
       onClick={() => setConfirming(true)}
       title="Delete this build and its files"
     >

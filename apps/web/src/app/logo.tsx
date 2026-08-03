@@ -25,9 +25,9 @@ const SPRITE = [
 ] as const;
 
 const COLORS: Record<string, string> = {
-  o: "#39445a", // outline -- mid-dark, so the silhouette survives a dark page
+  o: "#3f3f46", // outline -- mid-dark, so the silhouette survives a dark page
   E: "#ffffff", // the cutting edge, catching the light
-  S: "#b9c6d8", // steel
+  S: "#c4c4cc", // steel
   W: "#c9782f", // handle
 };
 

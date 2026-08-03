@@ -37,23 +37,24 @@ export default async function Home() {
         <AutoRefresh />
       </div>
 
-      <div className="stats">
-        <Stat label="Builds" value={String(total)} sub={`${RECENT} most recent shown`} />
-        <Stat
-          label="Succeeded"
+      <div className="metrics">
+        <Metric value={String(total)} label={total === 1 ? "build" : "builds"} />
+        <Metric
           value={finished === 0 ? "—" : `${Math.round((succeeded / finished) * 100)}%`}
-          sub={`${succeeded} of ${finished} finished`}
+          label={`succeeded (${succeeded}/${finished})`}
         />
-        <Stat
-          label="In flight"
+        <Metric
           value={String(inFlight)}
-          sub={inFlight === 0 ? "queue is idle" : "queued or running"}
+          label={inFlight === 0 ? "in flight — queue is idle" : "queued or running"}
         />
-        <Stat label="Artifacts" value={fmtBytes(diskUsed)} sub="across the builds below" />
+        <Metric value={fmtBytes(diskUsed)} label="of artifacts on disk" />
       </div>
 
       <div className="section-head">
         <h2>Recent</h2>
+        <span className="faint" style={{ fontSize: 12 }}>
+          {RECENT} most recent
+        </span>
       </div>
 
       {builds.length === 0 ? (
@@ -63,107 +64,93 @@ export default async function Home() {
           <pre>axe build --type apk</pre>
         </div>
       ) : (
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Project</th>
-                <th>Status</th>
-                <th>Type</th>
-                <th>Version</th>
-                <th>Took</th>
-                <th>Size</th>
-                <th>Started</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {builds.map((b) => (
-                <tr key={b.id}>
-                  <td>
-                    <div className="cell-main">
-                      <Link href={`/builds/${b.id}`}>{b.project.name}</Link>
-                    </div>
-                    <div className="cell-sub">{b.id}</div>
-                  </td>
-                  <td>
+        <div className="list">
+          {builds.map((b) => {
+            const running = b.status === "queued" || b.status === "running";
+            const live = b.releasedApk || b.releasedUpdate;
+            const liveWhat =
+              b.releasedApk && b.releasedUpdate ? "APK+OTA" : b.releasedApk ? "APK" : "OTA";
+
+            return (
+              <div className="list-row" key={b.id}>
+                <div className="row-body">
+                  <div className="row-title">
+                    <Link href={`/builds/${b.id}`}>{b.project.name}</Link>
                     <span className={statusClass(b.status)}>{b.status}</span>
-                    {b.error && (
-                      <div
-                        className="cell-sub wrap-text"
-                        style={{ color: "var(--failed)", maxWidth: 220 }}
-                      >
-                        {b.error.slice(0, 110)}
-                      </div>
-                    )}
-                  </td>
-                  <td>
-                    <span className="tag">
+                    {live && <span className="pill pill-live">live {liveWhat}</span>}
+                  </div>
+
+                  <div className="row-facts">
+                    <span>
                       {b.buildType}/{b.profile}
                     </span>
-                    <div className="cell-sub">{b.buildType === "update" ? "OTA only" : b.abi}</div>
-                  </td>
-                  <td>
-                    {b.versionName ? (
+                    {b.buildType !== "update" && (
                       <>
-                        <div className="cell-main mono">{b.versionName}</div>
-                        <div className="cell-sub">code {b.versionCode ?? "?"}</div>
+                        <span className="sep">·</span>
+                        <span>{b.abi}</span>
                       </>
-                    ) : (
-                      <span className="faint">—</span>
                     )}
-                    {(b.releasedApk || b.releasedUpdate) && (
-                      <div style={{ marginTop: 4 }}>
-                        <span className="pill pill-live">
-                          live
-                          {b.releasedApk && b.releasedUpdate
-                            ? " APK+OTA"
-                            : b.releasedApk
-                              ? " APK"
-                              : " OTA"}
+                    {b.versionName && (
+                      <>
+                        <span className="sep">·</span>
+                        <span>
+                          {b.versionName} ({b.versionCode ?? "?"})
                         </span>
-                      </div>
+                      </>
                     )}
-                  </td>
-                  <td className="mono dim">{fmtDuration(b.startedAt, b.finishedAt)}</td>
-                  <td className="mono dim">{fmtBytes(b.sizeBytes)}</td>
-                  <td className="dim" title={b.createdAt.toLocaleString()}>
-                    {fmtAgo(b.createdAt)}
-                  </td>
-                  <td>
-                    <div className="row" style={{ gap: 6, flexWrap: "nowrap" }}>
-                      <Link className="btn btn-sm" href={`/builds/${b.id}`}>
-                        Open
-                      </Link>
-                      {b.status === "success" && b.artifactPath && (
-                        <a
-                          className="btn btn-sm"
-                          href={`/api/builds/${b.id}/artifact?token=${encodeURIComponent(token())}`}
-                        >
-                          APK
-                        </a>
-                      )}
-                      {b.status !== "queued" && b.status !== "running" && (
-                        <DeleteBuildButton buildId={b.id} token={token()} />
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                    {/* A queued build has not started, so it has no duration to
+                        show — an em dash in the middle of the line is noise. */}
+                    {b.startedAt && (
+                      <>
+                        <span className="sep">·</span>
+                        <span>{fmtDuration(b.startedAt, b.finishedAt)}</span>
+                      </>
+                    )}
+                    {b.sizeBytes != null && (
+                      <>
+                        <span className="sep">·</span>
+                        <span>{fmtBytes(b.sizeBytes)}</span>
+                      </>
+                    )}
+                    <span className="sep">·</span>
+                    <span title={b.createdAt.toLocaleString()}>{fmtAgo(b.createdAt)}</span>
+                  </div>
+
+                  {b.error && (
+                    <div className="row-note error-text">{b.error.slice(0, 160)}</div>
+                  )}
+
+                  {running && <div className="row-bar" />}
+                </div>
+
+                <div className="row-actions">
+                  <Link className="btn btn-sm btn-ghost" href={`/builds/${b.id}`}>
+                    Open
+                  </Link>
+                  {b.status === "success" && b.artifactPath && (
+                    <a
+                      className="btn btn-sm"
+                      href={`/api/builds/${b.id}/artifact?token=${encodeURIComponent(token())}`}
+                    >
+                      APK
+                    </a>
+                  )}
+                  {!running && <DeleteBuildButton buildId={b.id} token={token()} ghost />}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </main>
   );
 }
 
-function Stat({ label, value, sub }: { label: string; value: string; sub: string }) {
+function Metric({ value, label }: { value: string; label: string }) {
   return (
-    <div className="stat">
-      <div className="stat-label">{label}</div>
-      <div className="stat-value">{value}</div>
-      <div className="stat-sub">{sub}</div>
+    <div className="metric">
+      <span className="metric-value">{value}</span>
+      <span className="metric-label">{label}</span>
     </div>
   );
 }

@@ -13,34 +13,43 @@ export default function Loading() {
         </span>
       </div>
 
+      <div className="section-head" style={{ marginTop: 0 }}>
+        <h2>Compose</h2>
+      </div>
       <div className="card stack" style={{ maxWidth: 700 }}>
         <div className="form-grid">
           {[0, 1, 2].map((i) => (
             <div key={i}>
               <span className="skeleton" style={{ width: 54, height: 10 }} />
-              <span className="skeleton" style={{ height: 36, marginTop: 8, borderRadius: 7 }} />
+              <span className="skeleton" style={{ height: 34, marginTop: 8, borderRadius: 6 }} />
             </div>
           ))}
         </div>
         <div>
           <span className="skeleton" style={{ width: 40, height: 10 }} />
-          <span className="skeleton" style={{ height: 36, marginTop: 8, borderRadius: 7 }} />
+          <span className="skeleton" style={{ height: 34, marginTop: 8, borderRadius: 6 }} />
         </div>
         <div>
           <span className="skeleton" style={{ width: 64, height: 10 }} />
-          <span className="skeleton" style={{ height: 96, marginTop: 8, borderRadius: 7 }} />
+          <span className="skeleton" style={{ height: 96, marginTop: 8, borderRadius: 6 }} />
         </div>
-        <span className="skeleton" style={{ width: 96, height: 34, borderRadius: 7 }} />
+        <span className="skeleton" style={{ width: 92, height: 32, borderRadius: 6 }} />
       </div>
 
       <div className="section-head">
         <h2>Sent</h2>
       </div>
-      <div className="card stack">
+      <div className="list">
         {[0, 1, 2].map((i) => (
-          <div key={i} style={{ opacity: 1 - i * 0.25 }}>
-            <span className="skeleton skeleton-line" style={{ width: "38%" }} />
-            <span className="skeleton skeleton-line" style={{ width: "72%" }} />
+          <div className="list-row" key={i} style={{ opacity: 1 - i * 0.22 }}>
+            <div className="row-body">
+              <span className="skeleton" style={{ width: "38%", height: 14 }} />
+              <span className="skeleton" style={{ width: "72%", height: 11, marginTop: 9 }} />
+              <span className="skeleton" style={{ width: "45%", height: 10, marginTop: 9 }} />
+            </div>
+            <div className="row-actions">
+              <span className="skeleton" style={{ width: 66, height: 24, borderRadius: 6 }} />
+            </div>
           </div>
         ))}
       </div>

@@ -2,13 +2,11 @@
 export default function Loading() {
   return (
     <main className="container">
-      <span className="faint" style={{ fontSize: 13 }}>
-        ← all builds
-      </span>
+      <span className="back-link">← All builds</span>
 
-      <div className="page-head" style={{ marginTop: 10 }}>
+      <div className="page-head">
         <div>
-          <span className="skeleton" style={{ width: 220, height: 22 }} />
+          <span className="skeleton" style={{ width: 220, height: 20 }} />
           <span className="skeleton" style={{ width: 160, height: 11, marginTop: 10 }} />
         </div>
         <span className="live is-busy">
@@ -17,6 +15,9 @@ export default function Loading() {
         </span>
       </div>
 
+      <div className="section-head" style={{ marginTop: 0 }}>
+        <h2>Overview</h2>
+      </div>
       <div className="card">
         <div className="meta-grid">
           {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
