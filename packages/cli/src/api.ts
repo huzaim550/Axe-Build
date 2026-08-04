@@ -52,6 +52,26 @@ export function releaseBuild(
   });
 }
 
+export function cancelBuild(
+  cfg: GlobalConfig,
+  id: string,
+  force = false,
+): Promise<{ status: string }> {
+  return request(cfg, `/api/builds/${id}/cancel${force ? "?force=1" : ""}`, { method: "POST" });
+}
+
+export function rebuildBuild(
+  cfg: GlobalConfig,
+  id: string,
+  overrides: { buildType?: string; profile?: string; abi?: string; ota?: boolean } = {},
+): Promise<{ buildId: string }> {
+  return request(cfg, `/api/builds/${id}/rebuild`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(overrides),
+  });
+}
+
 export async function uploadBuild(
   cfg: GlobalConfig,
   opts: {

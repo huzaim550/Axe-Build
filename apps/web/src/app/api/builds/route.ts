@@ -2,19 +2,11 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { db } from "@axebuild/db";
 import { isAuthorized, unauthorized } from "@/lib/auth";
+import { ABI_PRESETS, isBuildType, isProfile } from "@/lib/build-options";
 import { buildQueue } from "@/lib/queue";
 
 const UPLOADS_DIR = process.env.UPLOADS_DIR ?? "/data/uploads";
 const MAX_TARBALL_BYTES = 200 * 1024 * 1024;
-
-// Every extra ABI means compiling the whole native (C++) module graph again, so
-// the default is the one architecture essentially every modern phone uses.
-const ALL_ABIS = "armeabi-v7a,arm64-v8a,x86,x86_64";
-const ABI_PRESETS: Record<string, string> = {
-  "arm64-v8a": "arm64-v8a",
-  "arm64-v8a,armeabi-v7a": "arm64-v8a,armeabi-v7a",
-  all: ALL_ABIS,
-};
 
 export async function GET(req: Request) {
   if (!isAuthorized(req)) return unauthorized();
@@ -39,10 +31,10 @@ export async function POST(req: Request) {
   const ota = String(form.get("ota") ?? "") === "1";
   const tarball = form.get("tarball");
 
-  if (!["apk", "aab", "update"].includes(buildType)) {
+  if (!isBuildType(buildType)) {
     return Response.json({ error: "buildType must be apk, aab or update" }, { status: 400 });
   }
-  if (!["release", "debug"].includes(profile)) {
+  if (!isProfile(profile)) {
     return Response.json({ error: "profile must be release or debug" }, { status: 400 });
   }
   const abi = ABI_PRESETS[abiInput];

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { fmtAgo, fmtBytes, fmtDuration, statusClass } from "@/lib/format";
+import { CancelBuildButton } from "./cancel-build-button";
 import { DeleteBuildButton } from "./delete-build-button";
 
 /**
@@ -106,6 +107,7 @@ export function BuildRow({ build: b, token }: { build: BuildRowData; token: stri
             APK
           </a>
         )}
+        {running && <CancelBuildButton buildId={b.id} token={token} ghost />}
         {!running && <DeleteBuildButton buildId={b.id} token={token} ghost />}
       </div>
     </div>

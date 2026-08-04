@@ -12,6 +12,12 @@ export function execCapture(
   opts: ExecOptions,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
+    // Cancelled between two steps: don't start another process just to kill it.
+    if (opts.signal?.aborted) {
+      reject(new BuildCanceled());
+      return;
+    }
+
     const child = spawn(command, args, {
       cwd: opts.cwd,
       env: { ...process.env, ...opts.env },
@@ -28,15 +34,16 @@ export function execCapture(
       stderrTail = (stderrTail + c).slice(-2000);
     });
 
-    const timer = opts.timeoutMs
-      ? setTimeout(() => {
-          try {
-            process.kill(-child.pid!, "SIGKILL");
-          } catch {
-            /* already gone */
-          }
-        }, opts.timeoutMs)
-      : undefined;
+    const killGroup = () => {
+      try {
+        process.kill(-child.pid!, "SIGKILL");
+      } catch {
+        /* already gone */
+      }
+    };
+
+    const timer = opts.timeoutMs ? setTimeout(killGroup, opts.timeoutMs) : undefined;
+    opts.signal?.addEventListener("abort", killGroup, { once: true });
 
     child.on("error", (err) => {
       if (timer) clearTimeout(timer);
@@ -44,7 +51,8 @@ export function execCapture(
     });
     child.on("close", (code) => {
       if (timer) clearTimeout(timer);
-      if (code === 0) resolve(stdout);
+      if (opts.signal?.aborted) reject(new BuildCanceled());
+      else if (code === 0) resolve(stdout);
       else reject(new Error(`Command failed (exit ${code}): ${command} ${args.join(" ")}\n${stderrTail}`));
     });
   });
@@ -55,6 +63,24 @@ export interface ExecOptions {
   env?: NodeJS.ProcessEnv;
   /** Kill the whole process group if it runs longer than this. */
   timeoutMs?: number;
+  /**
+   * Aborting kills the process group immediately and makes the call throw
+   * BuildCanceled. This is how "Cancel" reaches a Gradle run that may not have
+   * printed a line for ten minutes — waiting for the next log line would make
+   * the button useless exactly when it's needed.
+   */
+  signal?: AbortSignal;
+}
+
+/**
+ * Thrown when a build was cancelled rather than failing on its own. The worker
+ * tells the two apart to record `canceled` instead of `failed`.
+ */
+export class BuildCanceled extends Error {
+  constructor() {
+    super("Build canceled");
+    this.name = "BuildCanceled";
+  }
 }
 
 /**
@@ -67,6 +93,9 @@ export async function* execStream(
   args: string[],
   opts: ExecOptions,
 ): AsyncGenerator<string, void, void> {
+  // Cancelled between two steps: don't start another process just to kill it.
+  if (opts.signal?.aborted) throw new BuildCanceled();
+
   const child = spawn(command, args, {
     cwd: opts.cwd,
     env: { ...process.env, ...opts.env },
@@ -104,6 +133,10 @@ export async function* execStream(
       }, opts.timeoutMs)
     : undefined;
 
+  // Kill on cancel too. The child's `close` then unblocks the consumer below,
+  // which is what lets a cancel land mid-Gradle instead of at the next line.
+  opts.signal?.addEventListener("abort", killGroup, { once: true });
+
   child.on("error", (err) => {
     push(`[spawn error] ${err.message}`);
     closed = true;
@@ -135,6 +168,9 @@ export async function* execStream(
     if (!closed) killGroup();
   }
 
+  if (opts.signal?.aborted) {
+    throw new BuildCanceled();
+  }
   if (timedOut) {
     throw new Error(`Command timed out: ${command} ${args.join(" ")}`);
   }

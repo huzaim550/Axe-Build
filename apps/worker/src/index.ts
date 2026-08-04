@@ -6,12 +6,16 @@ import { Worker, type Job } from "bullmq";
 import Redis from "ioredis";
 import { db } from "@axebuild/db";
 import { AndroidRunner } from "./android.js";
+import { BuildCanceled } from "./exec.js";
 import type { BuildSpec } from "./runner.js";
 import { writeUpdateManifest } from "./updates.js";
 
 const WORKSPACES_DIR = process.env.WORKSPACES_DIR ?? "/workspaces";
 const ARTIFACTS_DIR = process.env.ARTIFACTS_DIR ?? "/data/artifacts";
 const BUILD_TIMEOUT_MS = Number(process.env.BUILD_TIMEOUT_MS ?? 60 * 60 * 1000);
+
+/** Redis channel the web app publishes a build id on to stop it. */
+const CANCEL_CHANNEL = "builds:cancel";
 
 function redisConnection() {
   const url = new URL(process.env.REDIS_URL ?? "redis://redis:6379");
@@ -26,6 +30,13 @@ function publishLog(buildId: string, line: string): void {
     console.error(`[${buildId}] log publish failed:`, err);
   });
 }
+
+/**
+ * The build being processed right now, if any. Concurrency is 1, so one slot is
+ * the whole registry — a cancel message either matches it or refers to a build
+ * that is still queued (which the web app cancels itself, by dropping the job).
+ */
+let current: { buildId: string; abort: AbortController } | null = null;
 
 function publishDone(buildId: string, status: string): void {
   publisher.publish(`logs:${buildId}`, JSON.stringify({ type: "done", status })).catch((err) => {
@@ -65,15 +76,27 @@ async function processBuild(job: Job<{ buildId: string }>): Promise<void> {
   const logPath = path.join(buildArtifactsDir, "build.log");
   const log = fs.createWriteStream(logPath, { flags: "a" });
 
-  await db().build.update({
-    where: { id: buildId },
-    data: { status: "running", startedAt: new Date(), logPath },
-  });
-
   const workspaceDir = await fsp.mkdtemp(path.join(WORKSPACES_DIR, `${buildId}-`));
-  console.log(`[${buildId}] started in ${workspaceDir}`);
+
+  // Registered BEFORE the row says "running", and everything after this point
+  // is inside the try/finally that clears it. The web app cancels a `queued`
+  // build itself and only falls back to us once it sees "running" — if that
+  // flip happened first, a cancel arriving in between would find no build to
+  // abort and be dropped on the floor while the dashboard said "canceling".
+  const abort = new AbortController();
+  current = { buildId, abort };
 
   try {
+    await db().build.update({
+      where: { id: buildId },
+      data: { status: "running", startedAt: new Date(), logPath },
+    });
+    console.log(`[${buildId}] started in ${workspaceDir}`);
+
+    // Read the keystore now rather than in the runner: the runner stays a pure
+    // "spec in, artifact out" and never touches the database.
+    const keystore = await db().keystore.findUnique({ where: { projectId: build.projectId } });
+
     const spec: BuildSpec = {
       buildId,
       tarballPath: build.tarballPath,
@@ -84,6 +107,15 @@ async function processBuild(job: Job<{ buildId: string }>): Promise<void> {
       ota: build.ota,
       workspaceDir,
       deadline: Date.now() + BUILD_TIMEOUT_MS,
+      signal: abort.signal,
+      signing: keystore
+        ? {
+            storeFile: keystore.path,
+            keyAlias: keystore.keyAlias,
+            storePassword: keystore.storePassword,
+            keyPassword: keystore.keyPassword,
+          }
+        : undefined,
     };
 
     const runner = new AndroidRunner();
@@ -142,17 +174,38 @@ async function processBuild(job: Job<{ buildId: string }>): Promise<void> {
     publishDone(buildId, "success");
     console.log(`[${buildId}] success: ${artifactPath ?? updateDirPath}`);
   } catch (err) {
+    // A cancelled build is not a failed one: nothing is wrong with the source,
+    // so it must not show up red among the builds that genuinely broke.
+    const canceled = err instanceof BuildCanceled || abort.signal.aborted;
     const message = err instanceof Error ? err.message : String(err);
-    const failedLine = `==> FAILED: ${message}`;
-    log.write(failedLine + "\n");
-    publishLog(buildId, failedLine);
-    await db().build.update({
-      where: { id: buildId },
-      data: { status: "failed", error: message.slice(0, 2000), finishedAt: new Date() },
-    });
-    publishDone(buildId, "failed");
-    console.error(`[${buildId}] failed: ${message}`);
+
+    if (canceled) {
+      const line = `==> CANCELED`;
+      log.write(line + "\n");
+      publishLog(buildId, line);
+      await db().build.update({
+        where: { id: buildId },
+        data: {
+          status: "canceled",
+          error: "Canceled from the dashboard",
+          finishedAt: new Date(),
+        },
+      });
+      publishDone(buildId, "canceled");
+      console.log(`[${buildId}] canceled`);
+    } else {
+      const failedLine = `==> FAILED: ${message}`;
+      log.write(failedLine + "\n");
+      publishLog(buildId, failedLine);
+      await db().build.update({
+        where: { id: buildId },
+        data: { status: "failed", error: message.slice(0, 2000), finishedAt: new Date() },
+      });
+      publishDone(buildId, "failed");
+      console.error(`[${buildId}] failed: ${message}`);
+    }
   } finally {
+    current = null;
     log.end();
     // Machine safety: the workspace is ALWAYS deleted, success or failure.
     await fsp.rm(workspaceDir, { recursive: true, force: true }).catch((e) => {
@@ -161,8 +214,32 @@ async function processBuild(job: Job<{ buildId: string }>): Promise<void> {
   }
 }
 
+/**
+ * Listen for cancel requests.
+ *
+ * ioredis connections in subscriber mode can't run normal commands, so this is
+ * a second connection alongside `publisher`. A message for a build we aren't
+ * running is ignored: it was still queued, and the web app cancels those by
+ * dropping the job from the queue, where the worker never sees them at all.
+ */
+async function subscribeToCancels(): Promise<Redis> {
+  const subscriber = new Redis(redisConnection());
+  await subscriber.subscribe(CANCEL_CHANNEL);
+  subscriber.on("message", (_channel, buildId) => {
+    if (current && current.buildId === buildId) {
+      console.log(`[${buildId}] cancel requested`);
+      const line = "==> Cancel requested — stopping the build";
+      publishLog(buildId, line);
+      current.abort.abort();
+    }
+  });
+  return subscriber;
+}
+
 async function main() {
   await waitForDb();
+
+  const cancels = await subscribeToCancels();
 
   const worker = new Worker<{ buildId: string }>("builds", processBuild, {
     connection: redisConnection(),
@@ -175,6 +252,7 @@ async function main() {
   const shutdown = async (signal: string) => {
     console.log(`${signal} received, shutting down`);
     await worker.close();
+    cancels.disconnect();
     process.exit(0);
   };
   process.on("SIGTERM", () => void shutdown("SIGTERM"));

@@ -2,7 +2,15 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { Command } from "commander";
-import { createProject, getBuild, listProjects, releaseBuild, uploadBuild } from "./api.js";
+import {
+  cancelBuild,
+  createProject,
+  getBuild,
+  listProjects,
+  rebuildBuild,
+  releaseBuild,
+  uploadBuild,
+} from "./api.js";
 import {
   loadGlobalConfig,
   loadProjectConfig,
@@ -157,6 +165,48 @@ program
       await new Promise((r) => setTimeout(r, 3000));
     }
   });
+
+program
+  .command("cancel")
+  .description("Stop a queued or running build")
+  .argument("<buildId>")
+  .option("--force", "mark it canceled without waiting for the worker (stuck rows only)")
+  .action(async (buildId: string, opts: { force?: boolean }) => {
+    const cfg = loadGlobalConfig();
+    const r = await cancelBuild(cfg, buildId, Boolean(opts.force));
+    // "canceling" means the worker was asked to kill Gradle and hasn't finished
+    // yet — saying "canceled" here would be a lie for another few seconds.
+    console.log(
+      r.status === "canceled"
+        ? `Build ${buildId} canceled before it started.`
+        : `Cancel requested — the worker is stopping build ${buildId}.`,
+    );
+  });
+
+program
+  .command("rebuild")
+  .description("Queue the same source again, without re-uploading it")
+  .argument("<buildId>")
+  .option("--type <type>", "override the build type (apk | aab | update)")
+  .option("--profile <profile>", "override the profile (release | debug)")
+  .option("--abi <abi>", "override the ABI list")
+  .option("--ota", "also export an OTA bundle this time")
+  .action(
+    async (
+      buildId: string,
+      opts: { type?: string; profile?: string; abi?: string; ota?: boolean },
+    ) => {
+      const cfg = loadGlobalConfig();
+      const { buildId: newId } = await rebuildBuild(cfg, buildId, {
+        buildType: opts.type,
+        profile: opts.profile,
+        abi: opts.abi,
+        ota: opts.ota,
+      });
+      console.log(`Queued ${newId} from ${buildId}.`);
+      console.log(`Dashboard: ${cfg.url}/builds/${newId}`);
+    },
+  );
 
 program
   .command("release")

@@ -2,8 +2,10 @@ import Link from "next/link";
 import { db } from "@axebuild/db";
 import { token } from "@/lib/auth";
 import { fmtBytes, fmtDuration, statusClass } from "@/lib/format";
+import { CancelBuildButton } from "../../cancel-build-button";
 import { DeleteBuildButton } from "../../delete-build-button";
 import { BuildConsole } from "./console";
+import { RebuildButton } from "./rebuild-button";
 import { ReleaseButton } from "./release-button";
 
 export const dynamic = "force-dynamic";
@@ -31,8 +33,8 @@ export default async function BuildPage({ params }: { params: Promise<{ id: stri
     );
   }
 
-  // A queued or running build has nothing to download, promote or delete yet,
-  // and an empty "Actions" card is worse than no card.
+  // A queued or running build has nothing to download, promote or delete yet —
+  // the only thing it can offer is a way to stop it.
   const finished = build.status !== "queued" && build.status !== "running";
 
   return (
@@ -98,6 +100,24 @@ export default async function BuildPage({ params }: { params: Promise<{ id: stri
         </p>
       )}
 
+      {!finished && (
+        <>
+          <div className="section-head">
+            <h2>Actions</h2>
+          </div>
+          <div className="card">
+            <div className="row">
+              <CancelBuildButton buildId={build.id} token={token()} size="md" />
+              <span className="faint" style={{ fontSize: 12.5 }}>
+                {build.status === "queued"
+                  ? "Not started yet — canceling drops it from the queue."
+                  : "Stops Gradle and frees the worker for the next build."}
+              </span>
+            </div>
+          </div>
+        </>
+      )}
+
       {finished && (
         <>
           <div className="section-head">
@@ -123,6 +143,12 @@ export default async function BuildPage({ params }: { params: Promise<{ id: stri
                   releasedUpdate={build.releasedUpdate}
                 />
               )}
+              <RebuildButton
+                buildId={build.id}
+                token={token()}
+                buildType={build.buildType}
+                ota={build.ota}
+              />
               <span className="spacer" />
               <DeleteBuildButton
                 buildId={build.id}

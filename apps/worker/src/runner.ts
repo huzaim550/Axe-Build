@@ -13,6 +13,23 @@ export interface BuildSpec {
   workspaceDir: string;
   /** Absolute deadline for the whole build. */
   deadline: number;
+  /** Aborted when the build is cancelled from the dashboard. */
+  signal: AbortSignal;
+  /**
+   * The project's release keystore, when it has one. Absent means Gradle signs
+   * with the debug key it generates itself — installable, but not upgradable in
+   * place by a later differently-signed APK.
+   */
+  signing?: SigningConfig;
+}
+
+/** Everything Gradle needs to sign the release output. Passwords never reach a log. */
+export interface SigningConfig {
+  /** Absolute path to the .jks/.keystore on the read-only keystores volume. */
+  storeFile: string;
+  keyAlias: string;
+  storePassword: string;
+  keyPassword: string;
 }
 
 /** App identity, read from `expo config` — all optional, a build still succeeds without it. */
