@@ -190,7 +190,9 @@ curl http://localhost:3000/api/health      # {"ok":true}
 ```
 
 Open the dashboard at **`http://<server-ip>:3000`** from any machine on your network. You should
-see the Axe Build header and an empty builds table.
+see the Axe Build header and an empty projects list. The dashboard is organised the way Expo is:
+the home page lists **projects**, and a project's builds and its live release live inside it at
+`/projects/<slug>`.
 
 > **Never port-forward port 3000 on your router.** The dashboard embeds your token in its HTML so
 > download links work. Section 14 covers the supported way to reach the server from outside.

@@ -23,7 +23,7 @@ export default async function BuildPage({ params }: { params: Promise<{ id: stri
           <p>It may have been deleted.</p>
           <p style={{ marginTop: 16 }}>
             <Link className="btn" href="/">
-              Back to builds
+              Back to projects
             </Link>
           </p>
         </div>
@@ -37,8 +37,8 @@ export default async function BuildPage({ params }: { params: Promise<{ id: stri
 
   return (
     <main className="container">
-      <Link href="/" className="back-link">
-        ← All builds
+      <Link href={`/projects/${build.project.slug}`} className="back-link">
+        ← {build.project.name}
       </Link>
 
       <div className="page-head">
@@ -124,7 +124,12 @@ export default async function BuildPage({ params }: { params: Promise<{ id: stri
                 />
               )}
               <span className="spacer" />
-              <DeleteBuildButton buildId={build.id} token={token()} size="md" onDeleted="home" />
+              <DeleteBuildButton
+                buildId={build.id}
+                token={token()}
+                size="md"
+                onDeleted={`/projects/${build.project.slug}`}
+              />
             </div>
 
             {build.status === "success" && !build.runtimeVersion && build.updateDirPath && (

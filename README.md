@@ -211,7 +211,8 @@ confirmation, because installed apps are being served from it.
 docker-compose.yml     redis + web + worker, named volumes, resource limits
 Makefile               up / down / logs / nuke / nuke-sdk / clean-cache
 scripts/nuke.sh        full teardown (keeps android-sdk unless --sdk)
-apps/web/              Next.js dashboard (builds + notifications) + API routes
+apps/web/              Next.js dashboard (projects → builds, notifications)
+                       + API routes
                        (+ Dockerfile)
 apps/worker/           BullMQ consumer + Android build runner (+ Dockerfile,
                        entrypoint.sh bootstraps the SDK volume)

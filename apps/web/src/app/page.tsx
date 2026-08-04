@@ -1,141 +1,147 @@
 import Link from "next/link";
 import { db } from "@axebuild/db";
-import { token } from "@/lib/auth";
-import { fmtAgo, fmtBytes, fmtDuration, statusClass } from "@/lib/format";
+import { fmtAgo, fmtBytes, statusClass } from "@/lib/format";
 import { AutoRefresh } from "./auto-refresh";
-import { DeleteBuildButton } from "./delete-build-button";
 
 export const dynamic = "force-dynamic";
 
-const RECENT = 50;
-
+/**
+ * The landing page: projects, not builds.
+ *
+ * A flat feed of every build across every app is what this used to be, and it
+ * reads fine with one project and not at all with four — you cannot tell whose
+ * APK just failed without reading each row. Builds now live inside the project
+ * that owns them, the same shape Expo uses.
+ */
 export default async function Home() {
-  const [builds, totals] = await Promise.all([
-    db().build.findMany({
+  const [projects, inFlight, sizes, released] = await Promise.all([
+    db().project.findMany({
       orderBy: { createdAt: "desc" },
-      take: RECENT,
-      include: { project: { select: { name: true, slug: true } } },
+      include: {
+        _count: { select: { builds: true } },
+        // The newest build is the whole status line for a project — what ran,
+        // how it went, how long ago.
+        builds: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+          select: { id: true, status: true, buildType: true, createdAt: true },
+        },
+      },
     }),
-    db().build.groupBy({ by: ["status"], _count: { _all: true } }),
+    db().build.groupBy({
+      by: ["projectId"],
+      where: { status: { in: ["queued", "running"] } },
+      _count: { _all: true },
+    }),
+    db().build.groupBy({ by: ["projectId"], _sum: { sizeBytes: true } }),
+    db().build.findMany({
+      where: { OR: [{ releasedApk: true }, { releasedUpdate: true }] },
+      select: { projectId: true, releasedApk: true, releasedUpdate: true, versionName: true },
+    }),
   ]);
 
-  const count = (status: string) =>
-    totals.find((row) => row.status === status)?._count._all ?? 0;
-  const total = totals.reduce((sum, row) => sum + row._count._all, 0);
-  const succeeded = count("success");
-  const finished = succeeded + count("failed") + count("canceled");
-  const inFlight = count("queued") + count("running");
-  const diskUsed = builds.reduce((sum, b) => sum + (b.sizeBytes ?? 0), 0);
+  const busy = new Map(inFlight.map((r) => [r.projectId, r._count._all]));
+  const disk = new Map(sizes.map((r) => [r.projectId, r._sum.sizeBytes ?? 0]));
+
+  const totalBuilds = projects.reduce((sum, p) => sum + p._count.builds, 0);
+  const totalBusy = inFlight.reduce((sum, r) => sum + r._count._all, 0);
+  const totalDisk = sizes.reduce((sum, r) => sum + (r._sum.sizeBytes ?? 0), 0);
+  const liveProjects = new Set(released.map((r) => r.projectId)).size;
 
   return (
     <main className="container">
       <div className="page-head">
         <div>
-          <h1>Builds</h1>
-          <p>Android APKs, AABs and OTA bundles, built on this machine.</p>
+          <h1>Projects</h1>
+          <p>Every app this server builds. Open one to see its builds and releases.</p>
         </div>
         <AutoRefresh />
       </div>
 
       <div className="metrics">
-        <Metric value={String(total)} label={total === 1 ? "build" : "builds"} />
         <Metric
-          value={finished === 0 ? "—" : `${Math.round((succeeded / finished) * 100)}%`}
-          label={`succeeded (${succeeded}/${finished})`}
+          value={String(projects.length)}
+          label={projects.length === 1 ? "project" : "projects"}
         />
+        <Metric value={String(totalBuilds)} label={totalBuilds === 1 ? "build" : "builds"} />
         <Metric
-          value={String(inFlight)}
-          label={inFlight === 0 ? "in flight — queue is idle" : "queued or running"}
+          value={String(totalBusy)}
+          label={totalBusy === 0 ? "in flight — queue is idle" : "queued or running"}
         />
-        <Metric value={fmtBytes(diskUsed)} label="of artifacts on disk" />
+        <Metric value={fmtBytes(totalDisk)} label="of artifacts on disk" />
       </div>
 
       <div className="section-head">
-        <h2>Recent</h2>
-        <span className="faint" style={{ fontSize: 12 }}>
-          {RECENT} most recent
-        </span>
+        <h2>All projects</h2>
+        {liveProjects > 0 && (
+          <span className="faint" style={{ fontSize: 12 }}>
+            {liveProjects} with a live release
+          </span>
+        )}
       </div>
 
-      {builds.length === 0 ? (
+      {projects.length === 0 ? (
         <div className="card empty">
-          <h2>No builds yet</h2>
-          <p>Run the CLI inside an Expo project and the build will appear here.</p>
-          <pre>axe build --type apk</pre>
+          <h2>No projects yet</h2>
+          <p>Run the CLI inside an Expo project to register it with this server.</p>
+          <pre>axe init</pre>
         </div>
       ) : (
         <div className="list">
-          {builds.map((b) => {
-            const running = b.status === "queued" || b.status === "running";
-            const live = b.releasedApk || b.releasedUpdate;
-            const liveWhat =
-              b.releasedApk && b.releasedUpdate ? "APK+OTA" : b.releasedApk ? "APK" : "OTA";
+          {projects.map((p) => {
+            const last = p.builds[0];
+            const running = busy.get(p.id) ?? 0;
+            const live = released.filter((r) => r.projectId === p.id);
+            const liveApk = live.find((r) => r.releasedApk);
+            const liveUpdate = live.find((r) => r.releasedUpdate);
 
             return (
-              <div className="list-row" key={b.id}>
+              <div className="list-row" key={p.id}>
                 <div className="row-body">
                   <div className="row-title">
-                    <Link href={`/builds/${b.id}`}>{b.project.name}</Link>
-                    <span className={statusClass(b.status)}>{b.status}</span>
-                    {live && <span className="pill pill-live">live {liveWhat}</span>}
+                    <Link href={`/projects/${p.slug}`}>{p.name}</Link>
+                    {liveApk && (
+                      <span className="pill pill-live">
+                        live APK{liveApk.versionName ? ` ${liveApk.versionName}` : ""}
+                      </span>
+                    )}
+                    {liveUpdate && <span className="pill pill-live">live OTA</span>}
+                    {running > 0 && <span className="pill pill-running">{running} running</span>}
                   </div>
 
                   <div className="row-facts">
+                    <span className="mono">{p.slug}</span>
+                    <span className="sep">·</span>
                     <span>
-                      {b.buildType}/{b.profile}
+                      {p._count.builds} {p._count.builds === 1 ? "build" : "builds"}
                     </span>
-                    {b.buildType !== "update" && (
+                    {last && (
                       <>
                         <span className="sep">·</span>
-                        <span>{b.abi}</span>
-                      </>
-                    )}
-                    {b.versionName && (
-                      <>
+                        <span>last {last.buildType}</span>
                         <span className="sep">·</span>
-                        <span>
-                          {b.versionName} ({b.versionCode ?? "?"})
+                        <span className={statusClass(last.status)}>{last.status}</span>
+                        <span className="sep">·</span>
+                        <span title={last.createdAt.toLocaleString()}>
+                          {fmtAgo(last.createdAt)}
                         </span>
                       </>
                     )}
-                    {/* A queued build has not started, so it has no duration to
-                        show — an em dash in the middle of the line is noise. */}
-                    {b.startedAt && (
+                    {(disk.get(p.id) ?? 0) > 0 && (
                       <>
                         <span className="sep">·</span>
-                        <span>{fmtDuration(b.startedAt, b.finishedAt)}</span>
+                        <span>{fmtBytes(disk.get(p.id) ?? 0)}</span>
                       </>
                     )}
-                    {b.sizeBytes != null && (
-                      <>
-                        <span className="sep">·</span>
-                        <span>{fmtBytes(b.sizeBytes)}</span>
-                      </>
-                    )}
-                    <span className="sep">·</span>
-                    <span title={b.createdAt.toLocaleString()}>{fmtAgo(b.createdAt)}</span>
                   </div>
 
-                  {b.error && (
-                    <div className="row-note error-text">{b.error.slice(0, 160)}</div>
-                  )}
-
-                  {running && <div className="row-bar" />}
+                  {running > 0 && <div className="row-bar" />}
                 </div>
 
                 <div className="row-actions">
-                  <Link className="btn btn-sm btn-ghost" href={`/builds/${b.id}`}>
+                  <Link className="btn btn-sm btn-ghost" href={`/projects/${p.slug}`}>
                     Open
                   </Link>
-                  {b.status === "success" && b.artifactPath && (
-                    <a
-                      className="btn btn-sm"
-                      href={`/api/builds/${b.id}/artifact?token=${encodeURIComponent(token())}`}
-                    >
-                      APK
-                    </a>
-                  )}
-                  {!running && <DeleteBuildButton buildId={b.id} token={token()} ghost />}
                 </div>
               </div>
             );

@@ -2,7 +2,9 @@
 export default function Loading() {
   return (
     <main className="container">
-      <span className="back-link">← All builds</span>
+      {/* The project this build belongs to is not known until the data lands,
+          so the crumb stays generic rather than flashing the wrong name. */}
+      <span className="back-link">← Back</span>
 
       <div className="page-head">
         <div>

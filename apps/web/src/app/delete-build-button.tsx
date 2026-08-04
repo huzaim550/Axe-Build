@@ -23,8 +23,11 @@ export function DeleteBuildButton({
 }: {
   buildId: string;
   token: string;
-  /** Where to go afterwards. Default is a refresh, which is right for a list. */
-  onDeleted?: "refresh" | "home";
+  /**
+   * Where to go afterwards — a path, usually the owning project. Left out, the
+   * page just refreshes, which is right for a row in a list.
+   */
+  onDeleted?: string;
   size?: "sm" | "md";
   /** Borderless until hovered — for a list, where it repeats on every row. */
   ghost?: boolean;
@@ -52,7 +55,7 @@ export function DeleteBuildButton({
         }
         throw new Error(body.error ?? `${res.status} ${res.statusText}`);
       }
-      if (onDeleted === "home") router.push("/");
+      if (onDeleted) router.push(onDeleted);
       else router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

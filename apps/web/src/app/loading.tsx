@@ -1,5 +1,5 @@
 /**
- * Shown while the builds page is being rendered on the server.
+ * Shown while the projects page is being rendered on the server.
  *
  * Deliberately the same shape as the real page — a metrics line and a list of
  * rows — so the layout does not jump when the data lands. A centred spinner
@@ -10,8 +10,8 @@ export default function Loading() {
     <main className="container">
       <div className="page-head">
         <div>
-          <h1>Builds</h1>
-          <p>Android APKs, AABs and OTA bundles, built on this machine.</p>
+          <h1>Projects</h1>
+          <p>Every app this server builds. Open one to see its builds and releases.</p>
         </div>
         <span className="live is-busy">
           <span className="spinner" />
@@ -26,18 +26,17 @@ export default function Loading() {
       </div>
 
       <div className="section-head">
-        <h2>Recent</h2>
+        <h2>All projects</h2>
       </div>
 
       <div className="list">
-        {[0, 1, 2, 3, 4, 5].map((row) => (
-          <div className="list-row" key={row} style={{ opacity: 1 - row * 0.13 }}>
+        {[0, 1, 2, 3].map((row) => (
+          <div className="list-row" key={row} style={{ opacity: 1 - row * 0.18 }}>
             <div className="row-body">
               <span className="skeleton" style={{ width: 190, height: 14 }} />
-              <span className="skeleton" style={{ width: "62%", height: 11, marginTop: 9 }} />
+              <span className="skeleton" style={{ width: "58%", height: 11, marginTop: 9 }} />
             </div>
             <div className="row-actions">
-              <span className="skeleton" style={{ width: 52, height: 24, borderRadius: 6 }} />
               <span className="skeleton" style={{ width: 52, height: 24, borderRadius: 6 }} />
             </div>
           </div>

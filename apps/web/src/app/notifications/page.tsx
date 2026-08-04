@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { db } from "@axebuild/db";
 import { token } from "@/lib/auth";
 import { fmtAgo } from "@/lib/format";
@@ -79,7 +80,9 @@ export default async function Notifications() {
                   )}
 
                   <div className="row-facts">
-                    <span>{n.project.name}</span>
+                    <Link className="link" href={`/projects/${n.project.slug}`}>
+                      {n.project.name}
+                    </Link>
                     <span className="sep">·</span>
                     <span>{n.channel}</span>
                     <span className="sep">·</span>

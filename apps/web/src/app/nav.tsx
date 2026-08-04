@@ -15,7 +15,7 @@ import { Logo } from "./logo";
 const LINKS: { href: string; label: string; icon: ReactNode }[] = [
   {
     href: "/",
-    label: "Builds",
+    label: "Projects",
     icon: (
       <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
         <path
@@ -46,8 +46,11 @@ const LINKS: { href: string; label: string; icon: ReactNode }[] = [
 ];
 
 function isActive(href: string, pathname: string): boolean {
-  // "/" would otherwise light up on every page.
-  if (href === "/") return pathname === "/" || pathname.startsWith("/builds");
+  // "/" would otherwise light up on every page. A build is reached through its
+  // project, so a build page keeps Projects lit rather than nothing at all.
+  if (href === "/") {
+    return pathname === "/" || pathname.startsWith("/projects") || pathname.startsWith("/builds");
+  }
   return pathname.startsWith(href);
 }
 
