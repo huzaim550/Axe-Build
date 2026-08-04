@@ -52,7 +52,7 @@ Web ─┘        │                                (Android SDK + JDK17 + Grad
 - No Docker-in-Docker, no `privileged`, no docker socket mounts.
 - Worker is hard-capped at **9 GB RAM / 3 CPUs** (`docker-compose.yml`) and Gradle's JVM at 4 GB, so a runaway build cannot freeze the host.
 - Every build runs in a fresh workspace directory that is **always deleted afterwards**, success or failure.
-- All mutable state is in named volumes: `redis-data`, `db-data`, `uploads`, `artifacts`, `workspaces`, `android-sdk`, `gradle-cache`, `npm-cache`, `ccache`.
+- All mutable state is in named volumes: `redis-data`, `db-data`, `uploads`, `artifacts`, `keystores`, `workspaces`, `android-sdk`, `gradle-cache`, `npm-cache`, `ccache`.
 
 ## The Android SDK lives on a volume, not in the image
 
@@ -98,7 +98,16 @@ axe build --type apk --profile release
 
 The CLI tars only your source (excludes `node_modules`, `.git`, `android/`, `ios/`, `.expo`), uploads it, and polls until the build finishes. The first build downloads all npm + Gradle dependencies and takes a long time (20–40 min on modest hardware); later builds reuse the `gradle-cache`/`npm-cache` volumes and are much faster.
 
-Output types: `--type apk|aab`, `--profile release|debug`, `--abi arm64-v8a|all`. Phase 0 builds are **unsigned-release/debug-keystore** APKs — fine for sideloading and testing. Keystore signing is Phase 2.
+Output types: `--type apk|aab`, `--profile release|debug`, `--abi arm64-v8a|all`.
+
+Upload a keystore on a project's **Signing** card and every release build of it is signed with your
+own key, which is what makes an APK upgradable in place. Without one, builds use Gradle's throwaway
+debug key: fine for sideloading and testing, but each build is unupgradable over the last. Do it
+before you have users — [DOCS.md §6.4](DOCS.md#64-sign-your-releases-do-this-before-you-give-the-app-to-anybody).
+
+A build you started by mistake can be stopped with **Cancel** (or `axe cancel <buildId>`), and any
+build can be run again from the source the server already has with **Rebuild** (or
+`axe rebuild <buildId> [--ota]`) — no re-upload.
 
 ### Build speed
 
@@ -194,8 +203,8 @@ curl -X POST http://<server>:3000/api/notifications/xtream-player-app \
 ```bash
 make down          # stop containers, keep volumes (builds/caches survive)
 make clean-cache   # wipe ONLY gradle+npm caches when disk gets tight
-make nuke          # containers + images + state volumes gone, SDK volume kept
-make nuke-sdk      # same, but drop the Android SDK too → host fully pristine
+make nuke          # containers + images + state volumes gone; SDK and keystores kept
+make nuke-sdk      # same, but drop the Android SDK too
 ```
 
 Individual builds are deleted from the dashboard (**Delete** on any finished build, or on its
@@ -203,14 +212,15 @@ page) — that removes the row, the APK/AAB, the log and the uploaded source tar
 how much disk it freed. A build that is currently released refuses to go without a second
 confirmation, because installed apps are being served from it.
 
-`make nuke` deliberately keeps the `android-sdk` volume so the next `make up` doesn't re-download several GB over your home connection. `make nuke-sdk` is the true full teardown: nothing remains on the machine except this source tree.
+`make nuke` deliberately keeps two volumes: `android-sdk`, so the next `make up` doesn't re-download several GB over your home connection, and `keystores`, because losing a signing key means never being able to update an installed app again. `make nuke-sdk` drops the SDK as well; `bash scripts/nuke.sh --sdk --keystores` is the true full teardown, after which nothing remains on the machine except this source tree.
 
 ## Repo layout
 
 ```
 docker-compose.yml     redis + web + worker, named volumes, resource limits
 Makefile               up / down / logs / nuke / nuke-sdk / clean-cache
-scripts/nuke.sh        full teardown (keeps android-sdk unless --sdk)
+scripts/nuke.sh        full teardown (keeps android-sdk and keystores unless
+                       --sdk / --keystores)
 apps/web/              Next.js dashboard (projects → builds, notifications)
                        + API routes
                        (+ Dockerfile)
@@ -237,4 +247,4 @@ project keeps building without being re-linked.
 
 - No `pnpm-lock.yaml` is committed yet; images run `pnpm install` against the version ranges in the package manifests. After your first successful image build you can generate and commit a lockfile for reproducibility.
 - Concurrency is fixed at 1 build at a time on purpose.
-- Live log streaming (SSE) and a per-build log console + progress bar are in — click "view" next to any build on the dashboard. Cancel button and Phase 2 (signing) are not built yet; the worker still writes the full build log to the `artifacts` volume (`build.log` next to each artifact) regardless.
+- Live log streaming (SSE), a per-build log console + progress bar, Cancel, Rebuild and keystore signing are all in. The worker writes the full build log to the `artifacts` volume (`build.log` next to each artifact) regardless of what the dashboard shows.
