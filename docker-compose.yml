@@ -52,9 +52,14 @@ services:
       PUBLIC_HOSTNAME: "${PUBLIC_HOSTNAME:-updates.manzaronline.site}"
       UPLOADS_DIR: /data/uploads
       ARTIFACTS_DIR: /data/artifacts
+      KEYSTORES_DIR: /data/keystores
     volumes:
       - db-data:/data/db
       - uploads:/data/uploads
+      # Release keystores. The dashboard writes them here; the worker mounts the
+      # same volume read-only. Losing this volume means losing the ability to
+      # ship an upgrade to already-installed apps — back it up (DOCS.md §15).
+      - keystores:/data/keystores
       # Writable, not :ro — deleting a build from the dashboard removes its
       # artifact directory here. The worker is still the only thing that
       # *writes* build output; the web app only ever serves it or deletes it.
@@ -81,6 +86,7 @@ services:
       REDIS_URL: "redis://redis:6379"
       UPLOADS_DIR: /data/uploads
       ARTIFACTS_DIR: /data/artifacts
+      KEYSTORES_DIR: /data/keystores
       WORKSPACES_DIR: /workspaces
       GRADLE_USER_HOME: /cache/gradle
       npm_config_cache: /cache/npm
@@ -105,6 +111,9 @@ services:
       - db-data:/data/db
       - uploads:/data/uploads:ro
       - artifacts:/data/artifacts
+      # Read-only: the worker signs with these and must never be able to
+      # overwrite or delete one.
+      - keystores:/data/keystores:ro
       - workspaces:/workspaces
       - android-sdk:/opt/android-sdk
       - gradle-cache:/cache/gradle
@@ -116,6 +125,7 @@ volumes:
   db-data:
   uploads:
   artifacts:
+  keystores:
   workspaces:
   # The Android SDK/NDK. Survives image rebuilds and `make nuke` on purpose —
   # it is several GB over a home connection. `make nuke-sdk` drops it.
