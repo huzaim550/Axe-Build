@@ -16,12 +16,12 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ slug:
 
   const project = await db().project.findUnique({
     where: { slug },
-    include: { _count: { select: { builds: true, notifications: true } }, keystore: true },
+    include: { _count: { select: { builds: true, notifications: true } } },
   });
   if (!project) return Response.json({ error: "project not found" }, { status: 404 });
 
   const { builds, notifications } = project._count;
-  if (builds > 0 || notifications > 0 || project.keystore) {
+  if (builds > 0 || notifications > 0) {
     return Response.json(
       {
         error:

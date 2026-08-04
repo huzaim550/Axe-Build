@@ -93,10 +93,6 @@ async function processBuild(job: Job<{ buildId: string }>): Promise<void> {
     });
     console.log(`[${buildId}] started in ${workspaceDir}`);
 
-    // Read the keystore now rather than in the runner: the runner stays a pure
-    // "spec in, artifact out" and never touches the database.
-    const keystore = await db().keystore.findUnique({ where: { projectId: build.projectId } });
-
     const spec: BuildSpec = {
       buildId,
       tarballPath: build.tarballPath,
@@ -108,14 +104,6 @@ async function processBuild(job: Job<{ buildId: string }>): Promise<void> {
       workspaceDir,
       deadline: Date.now() + BUILD_TIMEOUT_MS,
       signal: abort.signal,
-      signing: keystore
-        ? {
-            storeFile: keystore.path,
-            keyAlias: keystore.keyAlias,
-            storePassword: keystore.storePassword,
-            keyPassword: keystore.keyPassword,
-          }
-        : undefined,
     };
 
     const runner = new AndroidRunner();

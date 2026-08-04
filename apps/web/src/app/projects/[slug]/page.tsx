@@ -5,8 +5,6 @@ import { token } from "@/lib/auth";
 import { fmtAgo, fmtBytes } from "@/lib/format";
 import { AutoRefresh } from "../../auto-refresh";
 import { BUILD_ROW_SELECT, BuildRow } from "../../build-row";
-import { KeystoreForm } from "./keystore-form";
-import { RemoveKeystoreButton } from "./remove-keystore-button";
 
 export const dynamic = "force-dynamic";
 
@@ -18,11 +16,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ slug: 
 
   const project = await db().project.findUnique({
     where: { slug },
-    include: {
-      _count: { select: { builds: true, notifications: true } },
-      // Only the alias is ever read out of this — the passwords stay server-side.
-      keystore: { select: { keyAlias: true } },
-    },
+    include: { _count: { select: { builds: true, notifications: true } } },
   });
   if (!project) notFound();
 
@@ -160,53 +154,6 @@ export default async function ProjectPage({ params }: { params: Promise<{ slug: 
           </div>
         </div>
       )}
-
-      <div className="section-head">
-        <h2>Signing</h2>
-        <span className={project.keystore ? "pill pill-success" : "pill pill-muted"}>
-          {project.keystore ? "release keystore" : "debug key"}
-        </span>
-      </div>
-
-      <div className="card">
-        {project.keystore ? (
-          <div className="stack">
-            <div className="row">
-              <span>
-                Release builds are signed with alias{" "}
-                <span className="mono">{project.keystore.keyAlias}</span>.
-              </span>
-              <span className="spacer" />
-              <KeystoreForm
-                slug={project.slug}
-                token={token()}
-                existingAlias={project.keystore.keyAlias}
-              />
-              <RemoveKeystoreButton slug={project.slug} token={token()} />
-            </div>
-            <p className="note">
-              Keep a backup of this keystore somewhere off this machine. Without it you can never
-              ship an upgrade to anyone who already installed the app.
-            </p>
-          </div>
-        ) : (
-          <div className="stack">
-            <p className="note note-warn">
-              Release builds are signed with Gradle&apos;s throwaway debug key. They install fine,
-              but a later build signed with a real keystore cannot upgrade over them — your users
-              would have to uninstall first. Upload one before you ship to anybody.
-            </p>
-            <p className="faint" style={{ fontSize: 12.5 }}>
-              Don&apos;t have one? Create it once, on your own machine, and keep it safe:
-            </p>
-            <pre className="log" style={{ maxHeight: 90 }}>
-              keytool -genkeypair -v -keystore {project.slug}.jks -alias upload \{"\n"}
-              {"  "}-keyalg RSA -keysize 2048 -validity 10000
-            </pre>
-            <KeystoreForm slug={project.slug} token={token()} />
-          </div>
-        )}
-      </div>
 
       <div className="section-head">
         <h2>Builds</h2>
