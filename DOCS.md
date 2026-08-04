@@ -110,7 +110,8 @@ All state lives in Docker named volumes, never on your host filesystem:
 |---|---|---|
 | `db-data` | SQLite database: projects, builds, notifications | you lose build history and release state |
 | `artifacts` | APKs/AABs, build logs, OTA bundles | installed apps stop finding updates |
-| `uploads` | uploaded source tarballs | nothing important; they are per-build |
+| `uploads` | uploaded source tarballs | Rebuild stops working for existing builds |
+| `keystores` | release signing keys (worker mounts it read-only) | **you can never update an installed app again** — back this one up |
 | `android-sdk` | Android SDK + NDK (several GB) | next start re-downloads it (slow) |
 | `gradle-cache`, `npm-cache`, `ccache` | build caches | next build is slow again |
 | `workspaces` | in-progress build directories | nothing; always cleaned up |
@@ -301,7 +302,43 @@ the same name, an `empty` pill and a suffixed slug like `my-cool-app-w1ch` — p
 it. That button only appears on projects with no builds and no notifications, and the API refuses
 anything else, so it can't take a real app's history with it.
 
-### 6.4 One thing to check in your app config
+### 6.4 Sign your releases (do this before you give the app to anybody)
+
+Android identifies an installed app by its package name **and the key it was signed with**. A
+build with no keystore is signed with a throwaway debug key that Gradle generates on the spot —
+it installs fine, but the next build signs with a *different* throwaway key, so Android refuses to
+install it over the first one. Your users would have to uninstall (losing their data) every single
+time. Sign with your own keystore and every future build upgrades in place.
+
+Create one, once, on your own machine:
+
+```bash
+keytool -genkeypair -v -keystore my-cool-app.jks -alias upload \
+  -keyalg RSA -keysize 2048 -validity 10000
+```
+
+It asks for a password and some name/organisation fields (any answer is fine for a private app).
+Then open the project on the dashboard, find **Signing**, and upload the `.jks` with its alias and
+password.
+
+From that point every `release` build of that project is signed with it. Debug builds are left
+alone — they keep using the debug key, which is what you want for testing.
+
+> **Back the file up somewhere off this server, and keep the password.** Losing the keystore means
+> losing the ability to update the app for everyone who already installed it — there is no reset,
+> not here and not on the Play Store. The `keystores` volume is worth adding to your backups
+> (section 18).
+
+Two things worth knowing:
+
+- **Switching from unsigned to signed breaks upgrades once.** Anyone running a debug-key build has
+  to uninstall before installing the first properly signed one. Do this before you have users, not
+  after.
+- **A wrong password is only discovered by Gradle.** The upload checks the file really is a
+  keystore, but nothing verifies the password until the next build, which fails with a
+  `Failed to read key ... from store` error. Fix it by re-uploading with the right one.
+
+### 6.5 One thing to check in your app config
 
 `expo prebuild` runs non-interactively on the worker, so set an Android package id yourself
 rather than letting it guess:
@@ -378,6 +415,34 @@ only when you need x86 emulators or 32-bit devices, and expect a much longer bui
 
 A build is killed after 2 hours (`BUILD_TIMEOUT_MS`). Only one runs at a time; extra builds wait
 in the queue.
+
+### Stopping one
+
+Press **Cancel** on the build (or on its row), or:
+
+```bash
+axe cancel cmsc7msul000fijlf
+```
+
+A build that has not started yet is simply dropped from the queue. A running one is a different
+thing: the worker kills the whole Gradle process group, which takes a few seconds, and the build
+lands as `canceled` — not `failed`, because nothing was wrong with it. The worker is free for the
+next build immediately.
+
+### Rebuilding without re-uploading
+
+The source you uploaded is kept for as long as the build exists, so you can run it again from the
+server:
+
+```bash
+axe rebuild cmsc7msul000fijlf            # identical settings
+axe rebuild cmsc7msul000fijlf --ota      # same source, this time with an OTA bundle
+axe rebuild cmsc7msul000fijlf --abi all  # same source, every architecture
+```
+
+or press **Rebuild** on the build page. This creates a *new* build with its own id and its own
+copy of the source — deleting either one leaves the other intact. Useful for a Gradle failure that
+was really a flaky download, or for adding an OTA bundle to source you have already shipped.
 
 ### Getting the file
 
@@ -705,8 +770,9 @@ Bigger hammers:
 
 ```bash
 make clean-cache   # wipe gradle/npm/ccache only — history and artifacts untouched
-make nuke          # containers, images and state volumes gone; Android SDK kept
-make nuke-sdk      # the above plus the SDK volume — host is left pristine
+make nuke          # containers, images and state volumes gone; SDK + keystores kept
+make nuke-sdk      # the above plus the SDK volume
+bash scripts/nuke.sh --sdk --keystores   # everything, signing keys included
 ```
 
 ---
@@ -813,6 +879,24 @@ axe build --type aab --abi all              # Play Store bundle, every architect
 Never uploaded: `node_modules`, `.git`, `android`, `ios`, `.expo`, `dist`, `build`, `web-build`,
 `axe.json`, and any `.tgz`/`.apk`/`.aab` in the project root.
 
+### `axe cancel <buildId> [--force]`
+
+Stops a queued or running build. A queued one is dropped from the queue immediately; a running one
+is killed by the worker a few seconds later and recorded as `canceled`.
+
+`--force` marks the row canceled without waiting for the worker to confirm. Only use it on a build
+left `running` by a worker restart — on a genuinely running build it hides Gradle rather than
+stopping it.
+
+### `axe rebuild <buildId> [--type] [--profile] [--abi] [--ota]`
+
+Queues the same uploaded source again, with optional overrides. Prints the new build id.
+
+```bash
+axe rebuild cmsc7msul000f            # exactly the same again
+axe rebuild cmsc7msul000f --ota      # ...but with an OTA bundle this time
+```
+
 ### `axe release <buildId> [--apk] [--ota] [--undo]`
 
 Promote a successful build, or retire it.
@@ -836,12 +920,17 @@ marked **public**. Public routes are read-only, and are the only ones reachable 
 | `GET /api/health` | — | **public** `{ ok: true }` |
 | `POST /api/projects` | `{ name }` | `{ id, slug, name }` |
 | `GET /api/projects` | — | every project + build count |
+| `DELETE /api/projects/:slug` | — | deletes an **empty** project; `409` if it has builds |
+| `POST /api/projects/:slug/keystore` | multipart: file `keystore`, `keyAlias`, `storePassword`, `keyPassword` | `{ project, keyAlias, bytes }` |
+| `DELETE /api/projects/:slug/keystore` | — | detaches and deletes the keystore |
 | `POST /api/builds` | multipart: `projectSlug`, `buildType`, `profile`, `abi`, `ota`, file `tarball` | `{ buildId }` |
 | `GET /api/builds` | — | 100 most recent builds |
 | `GET /api/builds/:id` | — | one build with all its metadata |
 | `DELETE /api/builds/:id` | `?force=1` to delete a live build | `{ deleted, bytesFreed, wasReleased }` |
 | `GET /api/builds/:id/artifact` | `?token=` also accepted | the APK/AAB file |
 | `GET /api/builds/:id/logs` | `?token=` also accepted | SSE log stream (replays, then follows) |
+| `POST /api/builds/:id/cancel` | `?force=1` for a row orphaned by a worker restart | `{ status: "canceled" }`, or `202` + `"canceling"` while the worker stops it |
+| `POST /api/builds/:id/rebuild` | `{ buildType?, profile?, abi?, ota? }` | `{ buildId, from }` |
 | `POST /api/builds/:id/release` | `{ apk?, update? }` | new release state |
 | `GET /api/apps/:slug/latest` | `?channel=` | **public** current APK version + download URL |
 | `GET /api/apps/:slug/latest/download` | — | **public** that APK |
@@ -867,6 +956,7 @@ Everything lives in `docker-compose.yml`; values in `.env` override the defaults
 | `BIND_ADDR` | `0.0.0.0` | set to `127.0.0.1` to keep the dashboard off the LAN entirely |
 | `ANDROID_SDK_PACKAGES` | platform-tools, android-36, build-tools 36, ndk 27, cmake 3.30 | SDK packages fetched into the volume; the next start pulls only what is missing |
 | `BUILD_TIMEOUT_MS` | `7200000` (2 h) | a build past this is killed as stuck |
+| `KEYSTORES_DIR` | `/data/keystores` | where uploaded signing keys are written (read-only in the worker) |
 | `GRADLE_JVM_ARGS` | `-Xmx4g -XX:MaxMetaspaceSize=1g` | Gradle's JVM budget; stays inside the container limit |
 | `CCACHE_MAXSIZE` | `5G` | compiled-C++ cache size |
 | `mem_limit` / `cpus` (worker) | `9g` / `3` | hard caps so a build cannot freeze the host |
@@ -881,14 +971,22 @@ very first `make up`.
 
 ## 18. Maintenance and backups
 
-**What is worth backing up:** the `db-data` volume (build history, release state, notifications)
-and, if you care about being able to re-serve an exact APK, `artifacts`.
+**What is worth backing up:** the `keystores` volume first (see below), the `db-data` volume
+(build history, release state, notifications, and the keystore passwords), and — if you care about
+being able to re-serve an exact APK — `artifacts`.
 
 ```bash
 # Back up the database volume to a tarball
 docker run --rm -v mybuild_db-data:/data -v "$PWD":/backup alpine \
   tar czf /backup/axebuild-db-$(date +%F).tgz -C /data .
+
+# The keystores. Losing these means never being able to update an installed app again.
+docker run --rm -v mybuild_keystores:/data -v "$PWD":/backup alpine \
+  tar czf /backup/axebuild-keystores-$(date +%F).tgz -C /data .
 ```
+
+Keep the keystore backup somewhere other than this machine, and treat it like a password: anyone
+holding it can sign an app that Android will happily install as an update to yours.
 
 Everything else — caches, workspaces, uploads, the SDK — is reconstructible.
 
@@ -913,13 +1011,33 @@ most common causes, in order:
 | `SDK location not found` / missing platform | a package not in `ANDROID_SDK_PACKAGES` | add it in `docker-compose.yml`, `make up` |
 | Killed with no error, around Gradle | out of memory | lower `GRADLE_JVM_ARGS`, or raise the worker's `mem_limit` if the host has room |
 | `Build timed out` | over `BUILD_TIMEOUT_MS` | usually a first build on a slow connection — just retry; the caches are warm now |
-| Something about `expo prebuild` and a package id | no `expo.android.package` | set it in `app.json` (section 6.4) |
+| Something about `expo prebuild` and a package id | no `expo.android.package` | set it in `app.json` (section 6.5) |
 | A native module's code is missing after prebuild | it needs a config plugin, and the worker runs a bare `expo prebuild` | add the plugin to `expo.plugins` in your app config |
 
 ### The build is stuck at `queued`
 
-Another build is running — only one runs at a time. If nothing is running, the worker is down:
+Another build is running — only one runs at a time. Open the one that is running and press
+**Cancel** if it is not the one you care about. If nothing is running, the worker is down:
 `make ps`, then `make logs`.
+
+### The APK will not install over the one already on the phone
+
+Android is refusing because the two were signed with different keys — almost always because the
+installed one came from a build made before you uploaded a keystore. Uninstall the old app once,
+then install the signed build; every build after that upgrades in place. Section 6.4 has the
+detail.
+
+### A build is stuck at `running` and nothing is happening
+
+If the worker container restarted mid-build, the row can be left `running` with no job behind it —
+Cancel will sit at "canceling" because nothing is listening. Free it with:
+
+```bash
+axe cancel <buildId> --force
+```
+
+Check `make logs` first that a build really is not running: forcing a live one hides it from the
+dashboard without stopping the Gradle process.
 
 ### Every build is slow
 
