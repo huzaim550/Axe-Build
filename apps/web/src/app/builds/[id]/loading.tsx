@@ -1,3 +1,5 @@
+import { ChopLoader } from "../../chop-loader";
+
 /** Skeleton for one build while the server renders it. Same blocks, same order. */
 export default function Loading() {
   return (
@@ -42,12 +44,16 @@ export default function Loading() {
           </div>
           <span className="progress-pct faint">—</span>
         </div>
-        <pre className="log" style={{ minHeight: 180 }}>
-          <span className="loading-row">
-            <span className="spinner" />
-            Loading build…
-          </span>
-        </pre>
+        {/* The same figure the console shows once the data lands, so the two
+            states read as one moment rather than a swap. A div, not the real
+            page's <pre>: there is no preformatted text here, and a block
+            element inside <pre> is invalid HTML. */}
+        <div
+          className="log"
+          style={{ minHeight: 180, display: "flex", alignItems: "center", justifyContent: "center" }}
+        >
+          <ChopLoader caption="Loading this build" scale={3} />
+        </div>
       </div>
     </main>
   );

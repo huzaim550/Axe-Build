@@ -2,40 +2,61 @@
 
 import { useEffect, useRef, useState } from "react";
 import { statusClass } from "@/lib/format";
+import { ChopLoader } from "../../chop-loader";
 
 // Ordered checkpoints emitted by the worker (apps/worker/src/android.ts). Progress
 // is "how far through this list has the log gotten" — a good enough proxy since
-// Gradle itself doesn't report a real percentage.
-const STAGES: { marker: string; pct: number }[] = [
-  { marker: "Extracting source tarball", pct: 5 },
-  { marker: "Installing dependencies", pct: 20 },
-  { marker: "Reading app config", pct: 32 },
-  { marker: "Exporting update bundle", pct: 36 },
-  { marker: "Generating android project", pct: 42 },
-  { marker: "Running Gradle", pct: 55 },
-  { marker: "Artifact:", pct: 95 },
+// Gradle itself doesn't report a real percentage. The label is what the loader
+// says it is doing, so both readings come from one table and cannot disagree.
+type Stage = { marker: string; pct: number; label: string };
+
+const STAGES: Stage[] = [
+  { marker: "Extracting source tarball", pct: 5, label: "Unpacking your source" },
+  { marker: "Installing dependencies", pct: 20, label: "Installing dependencies" },
+  { marker: "Reading app config", pct: 32, label: "Reading your app config" },
+  { marker: "Exporting update bundle", pct: 36, label: "Exporting the update bundle" },
+  { marker: "Generating android project", pct: 42, label: "Generating the Android project" },
+  { marker: "Running Gradle", pct: 55, label: "Running Gradle" },
+  { marker: "Artifact:", pct: 95, label: "Packaging the artifact" },
 ];
 
 // OTA-only builds never reach prebuild/Gradle, so they need their own ladder —
 // otherwise the bar would stop at 36% on a build that is actually finished.
-const UPDATE_STAGES: { marker: string; pct: number }[] = [
-  { marker: "Extracting source tarball", pct: 10 },
-  { marker: "Installing dependencies", pct: 40 },
-  { marker: "Reading app config", pct: 60 },
-  { marker: "Exporting update bundle", pct: 75 },
-  { marker: "Update bundle ready", pct: 95 },
+const UPDATE_STAGES: Stage[] = [
+  { marker: "Extracting source tarball", pct: 10, label: "Unpacking your source" },
+  { marker: "Installing dependencies", pct: 40, label: "Installing dependencies" },
+  { marker: "Reading app config", pct: 60, label: "Reading your app config" },
+  { marker: "Exporting update bundle", pct: 75, label: "Exporting the update bundle" },
+  { marker: "Update bundle ready", pct: 95, label: "Wrapping up the bundle" },
 ];
+
+/** The furthest checkpoint the log has reached, or null before the first one. */
+function reachedStage(lines: string[], buildType: string): Stage | null {
+  const stages = buildType === "update" ? UPDATE_STAGES : STAGES;
+  let reached: Stage | null = null;
+  for (const line of lines) {
+    for (const stage of stages) {
+      if (line.includes(stage.marker) && stage.pct > (reached?.pct ?? 0)) reached = stage;
+    }
+  }
+  return reached;
+}
 
 function progressFor(lines: string[], status: string, buildType: string): number {
   if (status === "success") return 100;
-  const stages = buildType === "update" ? UPDATE_STAGES : STAGES;
-  let pct = status === "queued" ? 0 : 2;
-  for (const line of lines) {
-    for (const stage of stages) {
-      if (line.includes(stage.marker) && stage.pct > pct) pct = stage.pct;
-    }
-  }
-  return pct;
+  const reached = reachedStage(lines, buildType);
+  const floor = status === "queued" ? 0 : 2;
+  return Math.max(floor, reached?.pct ?? 0);
+}
+
+/** What the loader says while it chops. */
+function captionFor(lines: string[], status: string, buildType: string): string {
+  // A queued build has no worker yet, so naming a stage would be a lie.
+  if (status === "queued") return "Waiting for a free worker";
+  return (
+    reachedStage(lines, buildType)?.label ??
+    (buildType === "update" ? "Building your update" : "Building your APK")
+  );
 }
 
 export function BuildConsole({
@@ -109,6 +130,10 @@ export function BuildConsole({
         </div>
         <span className="progress-pct">{pct}%</span>
       </div>
+
+      {/* Only while something is actually happening. A finished build gets its
+          log back and nothing else. */}
+      {running && <ChopLoader caption={captionFor(lines, status, buildType)} />}
 
       <div className="log-head">
         {running && <span className="spinner" />}

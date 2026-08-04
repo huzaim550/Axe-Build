@@ -763,6 +763,44 @@ kbd {
   font-size: 13px;
 }
 
+/* The chopping loader (see chop-loader.tsx). The one piece of decoration in
+   here that is allowed to exist for its own sake — a build is 8-15 minutes of
+   staring at a log, and the figure gives that time a shape. It only ever shows
+   while something is genuinely working. */
+.chop-loader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 0 22px;
+}
+.chop-loader canvas {
+  display: block;
+  /* Both spellings on purpose: crisp-edges is what Firefox honours. */
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  background: transparent;
+  /* Never let the figure widen the card it sits in. */
+  max-width: 100%;
+  height: auto;
+}
+.chop-caption {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+/* The trailing "..." types itself. Reserved width so the caption does not
+   shuffle sideways on every step. */
+.chop-caption .dots::after {
+  content: "";
+  display: inline-block;
+  width: 1.6em;
+  text-align: left;
+  animation: chopDots 1.2s steps(4, end) infinite;
+}
+
 /* ---------------------------------------------------------------- misc -- */
 
 .empty {
@@ -893,6 +931,23 @@ kbd {
     transform: translateX(320%);
   }
 }
+@keyframes chopDots {
+  0% {
+    content: "";
+  }
+  25% {
+    content: ".";
+  }
+  50% {
+    content: "..";
+  }
+  75% {
+    content: "...";
+  }
+  100% {
+    content: "";
+  }
+}
 
 /* Motion is information here (a build is moving), so it is not removed
    outright -- it is reduced to something that does not animate continuously. */
@@ -910,6 +965,12 @@ kbd {
   }
   .spinner {
     animation-duration: 2s;
+  }
+  /* The figure itself stops in chop-loader.tsx (it is canvas, not CSS); this is
+     its caption, held at three dots so the line keeps its width. */
+  .chop-caption .dots::after {
+    animation: none;
+    content: "...";
   }
   * {
     transition-duration: 0.01ms !important;
