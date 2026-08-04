@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { db } from "@axebuild/db";
+import { token } from "@/lib/auth";
 import { fmtAgo, fmtBytes, statusClass } from "@/lib/format";
 import { AutoRefresh } from "./auto-refresh";
+import { DeleteProjectButton } from "./delete-project-button";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +20,7 @@ export default async function Home() {
     db().project.findMany({
       orderBy: { createdAt: "desc" },
       include: {
-        _count: { select: { builds: true } },
+        _count: { select: { builds: true, notifications: true } },
         // The newest build is the whole status line for a project — what ran,
         // how it went, how long ago.
         builds: {
@@ -94,6 +96,9 @@ export default async function Home() {
             const live = released.filter((r) => r.projectId === p.id);
             const liveApk = live.find((r) => r.releasedApk);
             const liveUpdate = live.find((r) => r.releasedUpdate);
+            // A project with nothing in it is almost always a duplicate
+            // `axe init` — worth being able to clear off this page.
+            const empty = p._count.builds === 0 && p._count.notifications === 0;
 
             return (
               <div className="list-row" key={p.id}>
@@ -107,6 +112,7 @@ export default async function Home() {
                     )}
                     {liveUpdate && <span className="pill pill-live">live OTA</span>}
                     {running > 0 && <span className="pill pill-running">{running} running</span>}
+                    {empty && <span className="pill pill-muted">empty</span>}
                   </div>
 
                   <div className="row-facts">
@@ -142,6 +148,7 @@ export default async function Home() {
                   <Link className="btn btn-sm btn-ghost" href={`/projects/${p.slug}`}>
                     Open
                   </Link>
+                  {empty && <DeleteProjectButton slug={p.slug} token={token()} />}
                 </div>
               </div>
             );

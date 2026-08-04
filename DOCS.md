@@ -296,6 +296,11 @@ You can see every slug on the dashboard, or with:
 curl -H "authorization: Bearer $LOCAL_TOKEN" http://192.168.1.50:3000/api/projects
 ```
 
+If a duplicate already slipped through — you'll see it on the projects page as a second row with
+the same name, an `empty` pill and a suffixed slug like `my-cool-app-w1ch` — press **Delete** on
+it. That button only appears on projects with no builds and no notifications, and the API refuses
+anything else, so it can't take a real app's history with it.
+
 ### 6.4 One thing to check in your app config
 
 `expo prebuild` runs non-interactively on the worker, so set an Android package id yourself
