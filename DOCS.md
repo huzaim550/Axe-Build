@@ -47,9 +47,9 @@ and you have an Expo app, you can follow it start to finish.
 **It does not:**
 
 - Build for **iOS**. That needs macOS and Xcode; it is out of scope.
-- Sign with a **production keystore** yet. Builds are signed with the standard Android debug
-  keystore — perfect for sideloading and for updating your own installs, not accepted by the
-  Play Store. (Keystore support is planned; see `Keystore` in `packages/db/prisma/schema.prisma`.)
+- Sign **APKs** with anything but the standard Android debug keystore — perfect for sideloading
+  and for updating your own installs, not accepted by the Play Store. `aab` builds are the
+  exception: upload a keystore for a project and its bundles are signed with it (section 8a).
 - Run **more than one build at a time**. The queue is deliberately serial; consumer hardware
   cannot do two Gradle builds at once without swapping itself to death.
 - Provide **user accounts**. There is one server, one token, one person: you.
@@ -431,6 +431,57 @@ phone's browser** and tap the downloaded file.
 
 Installing a newer build **over** an older one works, as long as both came from here. Going the
 other way (installing an older `versionCode` over a newer one) does not; uninstall first.
+
+---
+
+## 8a. Signing a bundle for the Play Store
+
+Google rejects a debug-signed upload, so a project bound for the Play Store needs its own
+**upload key**. Generate one, and back it up somewhere that is not the build server:
+
+```bash
+keytool -genkeypair -v -keystore myapp-upload.jks -alias myapp \
+  -keyalg RSA -keysize 2048 -validity 10000
+```
+
+Give it to the server once, per project:
+
+```bash
+curl -X POST http://<server>:3000/api/projects/<slug>/keystore \
+  -H "Authorization: Bearer $LOCAL_TOKEN" \
+  -F keystore=@myapp-upload.jks \
+  -F keyAlias=myapp \
+  -F storePassword=… \
+  -F keyPassword=…            # omit if it is the same as storePassword
+```
+
+`GET` the same URL to see what is configured (alias and filename only — never the passwords),
+and `DELETE` it to remove both the row and the file.
+
+From then on, every `--type aab` build for that project is signed with it:
+
+```bash
+axe build --type aab --abi all
+```
+
+The log says which alias it used. **`apk` builds are deliberately left alone** — signing those
+with the upload key too would change their signature, and Android refuses to install an update
+signed by a different key, so every existing sideloaded install would have to be uninstalled
+(losing its data) the first time you uploaded a keystore.
+
+Verify before uploading to Play:
+
+```bash
+keytool -printcert -jarfile app-release.aab      # must not say CN=Android Debug
+```
+
+Two things to know:
+
+- **The passwords are stored in plaintext**, like every other credential on this server. That is
+  only defensible because the whole thing is LAN-only behind one token. Never expose it.
+- **The `keystores` volume is not disposable.** Once an app is published, Play only accepts
+  uploads signed with the same key; losing the volume means a key-reset request to Google.
+  `make nuke` will take it with everything else.
 
 ---
 
@@ -883,6 +934,9 @@ marked **public**. Public routes are read-only, and are the only ones reachable 
 | `POST /api/projects` | `{ name }` | `{ id, slug, name }` |
 | `GET /api/projects` | — | every project + build count |
 | `DELETE /api/projects/:slug` | — | deletes an **empty** project; `409` if it has builds |
+| `GET /api/projects/:slug/keystore` | — | whether an upload key is configured (alias + filename, never passwords) |
+| `POST /api/projects/:slug/keystore` | multipart: `keystore`, `keyAlias`, `storePassword`, `keyPassword?` | stores it; `aab` builds are signed with it |
+| `DELETE /api/projects/:slug/keystore` | — | removes the row and the file |
 | `POST /api/builds` | multipart: `projectSlug`, `buildType`, `profile`, `abi`, `ota`, file `tarball` | `{ buildId }` |
 | `GET /api/builds` | — | 100 most recent builds |
 | `GET /api/builds/:id` | — | one build with all its metadata |

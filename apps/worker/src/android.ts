@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { BuildCanceled, execCapture, execStream } from "./exec.js";
-import type { AppMeta, BuildSpec, Runner, RunnerResult } from "./runner.js";
+import type { AppMeta, BuildSpec, KeystoreSpec, Runner, RunnerResult } from "./runner.js";
 
 const GRADLE_TASKS: Record<string, string> = {
   "apk/release": "assembleRelease",
@@ -81,6 +81,18 @@ export class AndroidRunner implements Runner {
     const task = GRADLE_TASKS[`${spec.buildType}/${spec.profile}`];
     if (!task) throw new Error(`Unsupported build: ${spec.buildType}/${spec.profile}`);
 
+    if (spec.buildType === "aab") {
+      if (spec.keystore) {
+        yield `==> Signing with this project's upload key (alias ${spec.keystore.keyAlias})`;
+        await writeSigningProperties(androidDir, spec.keystore);
+      } else {
+        // Better said here than discovered at the store, where the upload is
+        // simply refused with no explanation of what to do about it.
+        yield `==> WARNING: no keystore uploaded for this project, so this bundle`;
+        yield `    is debug-signed. Google Play rejects debug-signed uploads.`;
+      }
+    }
+
     yield `==> Running Gradle: ${task} (abis: ${spec.abis})`;
     // -P overrides the reactNativeArchitectures set in the generated
     // gradle.properties, so we narrow the ABI list without editing user files.
@@ -100,6 +112,39 @@ export class AndroidRunner implements Runner {
 
     return { artifactSourcePath: artifact, updateSourceDir, meta };
   }
+}
+
+/**
+ * Point Gradle at the upload key by appending to the generated
+ * `android/gradle.properties`.
+ *
+ * `android.injected.signing.*` is AGP's own mechanism, so it needs no edit to
+ * build.gradle -- which matters because `expo prebuild` regenerates that file
+ * on every build and any patch would have to be reapplied.
+ *
+ * A properties file rather than `-P` flags on the command line, deliberately.
+ * Two passwords are involved, and command-line arguments are visible in `ps`
+ * and, worse, are echoed verbatim by exec.ts when a command fails:
+ *
+ *     throw new Error(`Command failed (exit ${code}): ${command} ${args...}`)
+ *
+ * That message goes into the build log and the database. Every failed Gradle
+ * run would publish the keystore passwords. The properties file lives in the
+ * ephemeral workspace, which is deleted when the build ends.
+ */
+async function writeSigningProperties(androidDir: string, ks: KeystoreSpec): Promise<void> {
+  const propsPath = path.join(androidDir, "gradle.properties");
+  const existing = await fs.readFile(propsPath, "utf8").catch(() => "");
+  const lines = [
+    "",
+    "# Injected by the build server for this build only.",
+    `android.injected.signing.store.file=${ks.path}`,
+    `android.injected.signing.store.password=${ks.storePassword}`,
+    `android.injected.signing.key.alias=${ks.keyAlias}`,
+    `android.injected.signing.key.password=${ks.keyPassword}`,
+    "",
+  ].join("\n");
+  await fs.writeFile(propsPath, existing + lines, { mode: 0o600 });
 }
 
 /**

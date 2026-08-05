@@ -52,9 +52,13 @@ services:
       PUBLIC_HOSTNAME: "${PUBLIC_HOSTNAME:-updates.manzaronline.site}"
       UPLOADS_DIR: /data/uploads
       ARTIFACTS_DIR: /data/artifacts
+      KEYSTORES_DIR: /data/keystores
     volumes:
       - db-data:/data/db
       - uploads:/data/uploads
+      # Upload keys, one per project. Writable here because this is the side
+      # that receives the upload; the worker only ever reads them.
+      - keystores:/data/keystores
       # Writable, not :ro — deleting a build from the dashboard removes its
       # artifact directory here. The worker is still the only thing that
       # *writes* build output; the web app only ever serves it or deletes it.
@@ -81,6 +85,7 @@ services:
       REDIS_URL: "redis://redis:6379"
       UPLOADS_DIR: /data/uploads
       ARTIFACTS_DIR: /data/artifacts
+      KEYSTORES_DIR: /data/keystores
       WORKSPACES_DIR: /workspaces
       GRADLE_USER_HOME: /cache/gradle
       npm_config_cache: /cache/npm
@@ -104,6 +109,8 @@ services:
     volumes:
       - db-data:/data/db
       - uploads:/data/uploads:ro
+      # :ro — a build signs with the key, it never changes it.
+      - keystores:/data/keystores:ro
       - artifacts:/data/artifacts
       - workspaces:/workspaces
       - android-sdk:/opt/android-sdk
@@ -115,6 +122,10 @@ volumes:
   redis-data:
   db-data:
   uploads:
+  # Upload keys. Losing this volume means Play will not accept another build of
+  # an app already published with the key it held -- back it up off this
+  # machine, the same as any signing key.
+  keystores:
   artifacts:
   workspaces:
   # The Android SDK/NDK. Survives image rebuilds and `make nuke` on purpose —

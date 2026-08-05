@@ -61,7 +61,11 @@ async function waitForDb(): Promise<void> {
 
 async function processBuild(job: Job<{ buildId: string }>): Promise<void> {
   const { buildId } = job.data;
-  const build = await db().build.findUnique({ where: { id: buildId } });
+  const build = await db().build.findUnique({
+    where: { id: buildId },
+    // The upload key, if this project has one. Only aab builds use it.
+    include: { project: { include: { keystore: true } } },
+  });
   if (!build) {
     console.error(`Build ${buildId} not found in DB, skipping`);
     return;
@@ -104,6 +108,19 @@ async function processBuild(job: Job<{ buildId: string }>): Promise<void> {
       workspaceDir,
       deadline: Date.now() + BUILD_TIMEOUT_MS,
       signal: abort.signal,
+      // aab only. Signing the APKs with this key as well would change the
+      // signature of the sideloaded flavour, and Android refuses an update
+      // signed by a different key -- every existing install would have to be
+      // removed and reinstalled the first time a keystore was uploaded.
+      keystore:
+        build.buildType === "aab" && build.project?.keystore
+          ? {
+              path: build.project.keystore.path,
+              keyAlias: build.project.keystore.keyAlias,
+              storePassword: build.project.keystore.storePassword,
+              keyPassword: build.project.keystore.keyPassword,
+            }
+          : undefined,
     };
 
     const runner = new AndroidRunner();

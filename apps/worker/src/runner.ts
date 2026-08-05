@@ -1,3 +1,19 @@
+/**
+ * An upload key, for builds that have to be accepted by a store.
+ *
+ * Only ever applied to `aab` builds. Signing the APKs too would change the
+ * signature of the sideloaded flavour, and Android refuses to install an update
+ * signed by a different key -- so every existing install would have to be
+ * uninstalled, losing its data, the first time a project uploaded a keystore.
+ */
+export interface KeystoreSpec {
+  /** Absolute path to the .jks/.keystore on the keystores volume. */
+  path: string;
+  keyAlias: string;
+  storePassword: string;
+  keyPassword: string;
+}
+
 export interface BuildSpec {
   buildId: string;
   /** Absolute path to the uploaded source tarball (read-only). */
@@ -15,6 +31,8 @@ export interface BuildSpec {
   deadline: number;
   /** Aborted when the build is cancelled from the dashboard. */
   signal: AbortSignal;
+  /** Set when the project has one and this build is an aab. See KeystoreSpec. */
+  keystore?: KeystoreSpec;
 }
 
 /** App identity, read from `expo config` — all optional, a build still succeeds without it. */
