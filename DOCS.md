@@ -19,6 +19,7 @@ and you have an Expo app, you can follow it start to finish.
 6. [Add your first app](#6-add-your-first-app)
 7. [Build an APK](#7-build-an-apk)
 8. [Install it on a phone](#8-install-it-on-a-phone)
+   - [8a. Signing for the Play Store (keystores)](#8a-signing-for-the-play-store-keystores)
 9. [Release: what "live" means](#9-release-what-live-means)
 10. [Over-the-air updates](#10-over-the-air-updates)
 11. [Telling users a new APK exists](#11-telling-users-a-new-apk-exists)
@@ -359,7 +360,7 @@ terminal and the build carries on.
 
 | Flag | Values | Default | What it means |
 |---|---|---|---|
-| `--type` | `apk`, `aab`, `update` | `apk` | `aab` is for the Play Store; `update` is OTA-only and skips Gradle entirely (~90 s) |
+| `--type` | `apk`, `aab`, `update` | `apk` | `aab` is for the Play Store, and needs a signing key first (section 8a); `update` is OTA-only and skips Gradle entirely (~90 s) |
 | `--profile` | `release`, `debug` | `release` | `debug` is bigger and slower but keeps dev tooling |
 | `--abi` | `arm64-v8a`, `arm64-v8a,armeabi-v7a`, `all` | `arm64-v8a` | CPU architectures to compile. Each extra one recompiles the whole native graph |
 | `--ota` | flag | off | also export an OTA bundle alongside the APK (needed for the first OTA-capable build) |
@@ -427,61 +428,274 @@ phone's browser** and tap the downloaded file.
 3. Tap the downloaded file; Android asks you to allow "install unknown apps" for your browser the
    first time.
 4. Android will warn that the app is not from the Play Store. That is expected — these builds are
-   signed with the standard Android debug keystore.
+   signed with the standard Android debug keystore. Nothing needs to be done about that for
+   sideloading; the Play Store is a different story, which is section 8a.
 
 Installing a newer build **over** an older one works, as long as both came from here. Going the
-other way (installing an older `versionCode` over a newer one) does not; uninstall first.
+other way (installing an older `versionCode` over a newer one) does not; uninstall first. And an
+install signed by a *different key* never upgrades in place, whichever direction it goes — that is
+the trap section 8a exists to keep you out of.
 
 ---
 
-## 8a. Signing a bundle for the Play Store
+## 8a. Signing for the Play Store (keystores)
 
-Google rejects a debug-signed upload, so a project bound for the Play Store needs its own
-**upload key**. Generate one, and back it up somewhere that is not the build server:
+### Why you need a key at all
+
+Every Android app is signed. The signature is not decoration: Android uses it to decide whether an
+update is really from the same author as the version already installed. An update signed with a
+*different* key is refused outright ("App not installed"), and the only way past that is
+uninstalling the app first — which throws away its data.
+
+If you have **not** given this server a key, your builds are signed with the **Android debug
+keystore**: a throwaway key that ships with the Android SDK, whose certificate says
+`CN=Android Debug` and whose password everybody knows. That is completely fine for sideloading onto
+your own phones, which is what sections 7 and 8 do.
+
+**Google Play rejects it.** Uploading a debug-signed bundle fails in the Play Console with *"You
+uploaded a debug-signed APK or Android App Bundle"*, because a key the whole world holds proves
+nothing about who wrote the app.
+
+So the rule is simple:
+
+| What you are doing | Do you need a keystore? |
+|---|---|
+| Sideloading an APK onto your own devices (sections 7–8) | **No.** The debug key is fine. |
+| OTA updates (section 10) — JS and assets only | **No.** OTA bundles are not signed. |
+| Uploading an `.aab` to the Google Play Console | **Yes.** Once per app, and then forever. |
+
+### The two keys Google talks about
+
+The Play Console mentions two keys and it confuses everybody. They are not the same thing:
+
+| | **Upload key** | **App signing key** |
+|---|---|---|
+| What it is | the key you generate below | the key the app is signed with when Google ships it to phones |
+| Who holds it | you (and this build server) | Google, under **Play App Signing** |
+| Used when | you upload an `.aab` to the Play Console | Google re-signs your bundle before delivering it |
+| If you lose it | request a reset in the Play Console; you keep publishing | not yours to lose |
+
+Play App Signing is mandatory for apps created since August 2021, so the key you make here is
+almost certainly only an **upload key**. Losing it is recoverable — a support request, a few days —
+not the end of your app. That is a relief, not permission to be careless: back it up anyway.
+
+### Step 1 — get `keytool`
+
+`keytool` comes with every JDK. You probably already have one; check first:
 
 ```bash
-keytool -genkeypair -v -keystore myapp-upload.jks -alias myapp \
+keytool -help >/dev/null 2>&1 && echo "keytool is here"
+```
+
+If not, pick whichever is least trouble:
+
+| Where you are | Command / path |
+|---|---|
+| Fedora / RHEL | `sudo dnf install java-17-openjdk-headless` |
+| Debian / Ubuntu | `sudo apt install openjdk-17-jdk-headless` |
+| macOS (Homebrew) | `brew install openjdk@17` |
+| Have Android Studio | Linux/Windows: `<studio>/jbr/bin/keytool` · macOS: `/Applications/Android Studio.app/Contents/jbr/Contents/Home/bin/keytool` |
+
+Generate the key on **your own machine**, not on the build server. The server needs a copy, but the
+original and its backup should live somewhere you control.
+
+### Step 2 — generate the upload key
+
+```bash
+keytool -genkeypair -v \
+  -keystore myapp-upload.jks \
+  -alias myapp \
   -keyalg RSA -keysize 2048 -validity 10000
 ```
 
-Give it to the server once, per project:
+What the arguments mean:
+
+| Argument | Meaning |
+|---|---|
+| `-keystore myapp-upload.jks` | the file that will hold the key. Name it after the app; you will have one per app. |
+| `-alias myapp` | the name of the key *inside* that file. One keystore can hold several; you need this string later, exactly as typed. |
+| `-keyalg RSA -keysize 2048` | what Google requires (RSA 2048 or stronger). |
+| `-validity 10000` | days — about 27 years. Play requires a certificate valid past 2033, so do not shorten this. |
+
+It then asks you a series of questions:
+
+```
+Enter keystore password:            ← invent one. This is your storePassword.
+Re-enter new password:
+What is your first and last name?   ← [Unknown] anything: your name, or the app's name
+What is the name of your organizational unit?   ← may be left blank
+What is the name of your organization?
+What is the name of your City or Locality?
+What is the name of your State or Province?
+What is the two-letter country code for this unit?   ← e.g. PK, GB, US
+Is CN=..., OU=..., O=... correct?   ← type: yes
+Enter key password for <myapp>
+        (RETURN if same as keystore password):     ← press Enter, or set a second password
+```
+
+These answers go into the certificate. **Nobody sees them** — they are not shown on your Play
+listing — but they cannot be changed afterwards, so put something real. Pressing Enter at the last
+prompt makes the key password identical to the keystore password, which is the simplest thing to
+live with.
+
+Prefer not to be prompted (careful: this puts passwords in your shell history):
 
 ```bash
-curl -X POST http://<server>:3000/api/projects/<slug>/keystore \
+keytool -genkeypair -v \
+  -keystore myapp-upload.jks -alias myapp \
+  -keyalg RSA -keysize 2048 -validity 10000 \
+  -storepass "$STORE_PASS" -keypass "$STORE_PASS" \
+  -dname "CN=My App, OU=, O=My Org, L=Lahore, ST=Punjab, C=PK"
+```
+
+You now have three things, and you need all three from here on:
+
+1. the file `myapp-upload.jks`
+2. the alias — `myapp`
+3. the password(s) — store password, and the key password if you made it different
+
+### Step 3 — back it up, now, before anything else
+
+```bash
+# a password manager entry is better than a folder, but at minimum: not only on this laptop
+cp myapp-upload.jks ~/backups/       # and an offline copy — USB, external disk
+```
+
+- Put the alias and the passwords **with** the file. A keystore whose password you have forgotten
+  is exactly as useless as no keystore.
+- **Never commit it to git.** Add `*.jks` and `*.keystore` to your project's `.gitignore`.
+- Do not treat the build server as the backup. It is the *consumer* of the key, and `make nuke`
+  deletes the volume it lives in.
+
+### Step 4 — give the key to the build server (once per project)
+
+There is no `axe keystore` command yet; this is a plain HTTP upload. You need the project's
+**slug** — it is in `axe.json` in your project folder, and on the dashboard.
+
+```bash
+curl -X POST http://192.168.1.50:3000/api/projects/my-cool-app/keystore \
   -H "Authorization: Bearer $LOCAL_TOKEN" \
   -F keystore=@myapp-upload.jks \
   -F keyAlias=myapp \
-  -F storePassword=… \
-  -F keyPassword=…            # omit if it is the same as storePassword
+  --form-string storePassword="$STORE_PASS" \
+  --form-string keyPassword="$KEY_PASS"
 ```
 
-`GET` the same URL to see what is configured (alias and filename only — never the passwords),
-and `DELETE` it to remove both the row and the file.
+| Field | Required | Notes |
+|---|---|---|
+| `keystore` | yes | the `.jks` file itself — note the `@`, which tells curl to send the file. Max 1 MB. |
+| `keyAlias` | yes | the `-alias` from step 2, character for character. |
+| `storePassword` | yes | the keystore password. |
+| `keyPassword` | no | the key's own password. **Omit it if it is the same as the store password** — the server falls back to `storePassword`. |
 
-From then on, every `--type aab` build for that project is signed with it:
+Use `--form-string` for the passwords rather than `-F`. With `-F`, a value that begins with `@` or
+`<` is read as a *filename*, so a password like `@rsenal99` would be silently mangled.
+
+A successful response:
+
+```json
+{ "configured": true, "keyAlias": "myapp", "file": "my-cool-app.jks" }
+```
+
+What the server does with it: the file is written to the `keystores` volume as
+`/data/keystores/<slug>.jks` with mode `0600`, and the alias and passwords go into the database.
+The worker container mounts that volume **read-only**.
+
+Managing it afterwards — same URL, different verbs:
+
+```bash
+# What is configured? (alias and filename only — the passwords are never returned)
+curl -H "Authorization: Bearer $LOCAL_TOKEN" \
+  http://192.168.1.50:3000/api/projects/my-cool-app/keystore
+
+# Replace it: POST again. The file is named after the project, so the old one is overwritten
+# rather than left lying around.
+
+# Remove it: the row goes first, then the file — the next aab build is debug-signed again.
+curl -X DELETE -H "Authorization: Bearer $LOCAL_TOKEN" \
+  http://192.168.1.50:3000/api/projects/my-cool-app/keystore
+```
+
+> Replacing the key of an app that is **already on Play** is not just a POST here — you have to
+> register the new upload key with Google as well, from the Play Console. Do that first.
+
+### Step 5 — build a bundle
 
 ```bash
 axe build --type aab --abi all
 ```
 
-The log says which alias it used. **`apk` builds are deliberately left alone** — signing those
-with the upload key too would change their signature, and Android refuses to install an update
-signed by a different key, so every existing sideloaded install would have to be uninstalled
-(losing its data) the first time you uploaded a keystore.
+`--abi all` is the usual choice for Play: Google splits the bundle per device, so users still only
+download the slice they need, and you have not excluded anyone with a 32-bit or x86 device.
 
-Verify before uploading to Play:
+In the build log you will see either
 
-```bash
-keytool -printcert -jarfile app-release.aab      # must not say CN=Android Debug
+```
+==> Signing with this project's upload key (alias myapp)
 ```
 
-Two things to know:
+or, if you skipped step 4:
+
+```
+==> WARNING: no keystore uploaded for this project, so this bundle
+    is debug-signed. Google Play rejects debug-signed uploads.
+```
+
+Signing happens by writing `android.injected.signing.*` properties into the workspace's
+`gradle.properties`, which is deleted with the workspace when the build ends. The passwords are
+never passed on the Gradle command line, where they would be visible in `ps` and in the log.
+
+**`apk` builds are deliberately left unsigned by your key**, even after you upload one. Signing
+them too would change the signature of the sideloaded flavour, and Android refuses an update signed
+by a different key — so the first bundle you signed would break every phone that already has a
+sideloaded build, each of which would need uninstalling (and losing its data) to recover. `aab` for
+Play, `apk` for your own devices, two separate lives.
+
+### Step 6 — verify, then upload to Play
+
+Download the `.aab` and check what actually signed it before you spend an upload on it:
+
+```bash
+keytool -printcert -jarfile app-release.aab
+```
+
+Look at the `Owner:` line.
+
+| Output | Meaning |
+|---|---|
+| `Owner: CN=My App, O=My Org, ...` | correct — that is your upload key |
+| `Owner: CN=Android Debug, O=Android, C=US` | debug-signed: the server has no keystore for this project, or you built an `apk` |
+
+Then, in the Play Console: your app → **Release** → **Production** (or **Internal testing** for a
+first run) → **Create new release** → upload the `.aab`. The first upload of a new app enrols it in
+Play App Signing automatically; every later upload must be signed with the same upload key.
+
+### When it goes wrong
+
+| What you see | What it actually is |
+|---|---|
+| Play: *"You uploaded a debug-signed APK or Android App Bundle"* | no keystore configured for that project — step 4 was skipped, or you uploaded it to a different slug |
+| Play: *"Your Android App Bundle is signed with the wrong key"* | the keystore on the server is not the upload key this app is enrolled with. Check the fingerprint in the Play Console against `keytool -list -v -keystore myapp-upload.jks` |
+| Gradle: `Keystore was tampered with, or password was incorrect` | wrong `storePassword` |
+| Gradle: `Cannot recover key` | store password is right, `keyPassword` is wrong |
+| Gradle: `No key with alias 'x' found in keystore` | wrong `keyAlias`. `keytool -list -keystore myapp-upload.jks` prints the real ones |
+| `aab` builds fail right after a `DELETE`, deep inside Gradle | should not happen — the row is deleted before the file for exactly this reason — but if it does, re-POST the keystore |
+| Phone: *"App not installed"* on an update | the two builds were signed by different keys. Uninstall first, or go back to the key the installed version used |
+
+### Two things to know about how this is stored
 
 - **The passwords are stored in plaintext**, like every other credential on this server. That is
-  only defensible because the whole thing is LAN-only behind one token. Never expose it.
-- **The `keystores` volume is not disposable.** Once an app is published, Play only accepts
-  uploads signed with the same key; losing the volume means a key-reset request to Google.
-  `make nuke` will take it with everything else.
+  only defensible because the whole thing is LAN-only behind one token. Never expose it — the
+  keystore routes are not among the public routes the tunnel serves (section 14), and must not be.
+- **The `keystores` volume is not disposable.** `make nuke` takes it with everything else. Back it
+  up alongside the database:
+
+  ```bash
+  docker run --rm -v mybuild_keystores:/data -v "$PWD":/backup alpine \
+    tar czf /backup/axebuild-keystores-$(date +%F).tgz -C /data .
+  ```
+
+  This is a backup of secrets: encrypt it or keep it somewhere you would keep a password.
 
 ---
 
@@ -788,6 +1002,10 @@ make nuke          # containers, images and state volumes gone; Android SDK kept
 make nuke-sdk      # the above plus the SDK volume — host is left pristine
 ```
 
+`make clean-cache` stops the containers to release the volumes, so follow it with `make up`. And
+note that a build needs far more scratch space than the file it produces — if one has already died
+with `No space left on device`, section 19 has the full checklist.
+
 ---
 
 ## 14. Reaching phones outside your network
@@ -848,77 +1066,244 @@ hostname → one service and let the app do the filtering.
 
 ## 15. CLI reference
 
-All commands read `~/.axebuild/config.json` (written by `axe login`). Commands that act on a
-project also read `axe.json` from the current directory.
+```
+axe login    <url> [--token <token>]
+axe init     [--name <name>] [--slug <slug>]
+axe build    [--type] [--profile] [--abi] [--ota] [--release]
+axe cancel   <buildId> [--force]
+axe rebuild  <buildId> [--type] [--profile] [--abi] [--ota]
+axe release  <buildId> [--apk] [--ota] [--undo]
+```
+
+`axe --help` lists these; `axe <command> --help` shows one command's flags.
+
+### How the CLI finds things
+
+Two files, and nothing else:
+
+| File | Written by | Holds | Scope |
+|---|---|---|---|
+| `~/.axebuild/config.json` | `axe login` | `{ "url": ..., "token": ... }` | the whole machine |
+| `axe.json` (project folder) | `axe init` | `{ "projectSlug": ... }` | one project |
+
+Older installs used `~/.mybuild/config.json` and `mybuild.json`. Those are still **read** when they
+are the only file present, so an existing checkout keeps working; nothing is migrated behind your
+back. If both a new and a legacy project file exist and they name *different* slugs, `axe.json`
+wins and you get a warning — worth resolving, because the mismatch means builds go to one project
+while installed apps poll another.
+
+Every command that talks to the server sends `Authorization: Bearer <token>`. Errors are printed as
+one line, without a stack trace, and the process exits `1`:
+
+| Exit code | When |
+|---|---|
+| `0` | the command did what it said |
+| `1` | request failed (`401` bad token, `404` unknown build/project, `409` refused), no `axe.json`, not logged in, or — for `axe build` — the build itself failed or was canceled |
 
 ### `axe login <url> [--token <token>]`
 
-Save the server URL and token. Run once per development machine.
+Saves the server URL and token to `~/.axebuild/config.json`. Run it **once per development
+machine**, not once per project.
 
 ```bash
-axe login http://192.168.1.50:3000 --token 9f3c...
+axe login http://192.168.1.50:3000 --token 9f3c8e0b...
 ```
 
-`--token` defaults to `dev-local-token`.
+| Flag | Default | Notes |
+|---|---|---|
+| `<url>` | — | the dashboard's base URL. Use the server's **LAN IP**, not `localhost`, unless the CLI runs on the server itself. No trailing path. |
+| `--token` | `dev-local-token` | must equal the server's `LOCAL_TOKEN`. |
+
+This command does **not** contact the server — it only writes the file, so it always "succeeds". A
+wrong URL or token surfaces on the next command as a connection error or `401 unauthorized`. To
+check straight away:
+
+```bash
+curl -H "Authorization: Bearer 9f3c8e0b..." http://192.168.1.50:3000/api/projects
+```
+
+Re-running `login` overwrites the file, which is how you point the CLI at a different server.
 
 ### `axe init [--name <name>] [--slug <slug>]`
 
-Create a project on the server and write `axe.json` here.
+Creates a project on the server and writes `axe.json` into the current folder. Run it from your
+Expo project root — the folder with `package.json` and `app.json`.
 
-| Flag | Effect |
-|---|---|
-| `--name` | display name (default: the current folder's name) |
-| `--slug` | link to an **existing** project instead of creating one |
+| Flag | Default | Effect |
+|---|---|---|
+| `--name` | the current folder's name | display name on the dashboard. The slug is derived from it. |
+| `--slug` | — | **link** this folder to an existing project instead of creating one. Nothing is created. |
+
+The slug is the name lowercased, with every run of non-alphanumeric characters turned into `-`,
+trimmed of leading/trailing dashes and cut to 40 characters. `My Cool App!` → `my-cool-app`.
+
+```bash
+axe init                          # project named after the folder
+axe init --name "My Cool App"     # explicit name → slug my-cool-app
+axe init --slug my-cool-app       # link a second checkout to an existing project
+```
+
+**If a project with that name or slug already exists, `init` stops instead of creating one.** It
+prints the existing slug and the two ways forward:
+
+```
+Project 'My Cool App' (slug: my-cool-app) already exists on http://192.168.1.50:3000.
+  To link this folder to it:
+      axe init --slug my-cool-app
+  To create a separate project:
+      axe init --name <different-name>
+```
+
+That refusal is deliberate. The server resolves a slug collision by appending a random suffix, so
+without this check you would quietly get a *second* project: your builds would land on
+`my-cool-app-w1ch` while every installed app kept polling `my-cool-app` for updates, and releases
+would look green while reaching nobody.
+
+`--slug` is checked against the server's project list, so a typo fails loudly and lists the real
+slugs rather than writing a config that 404s on every build.
 
 ### `axe build [options]`
 
-Pack the current project, upload it, wait for the result. Exits non-zero on failure.
+Packs the current project, uploads it, and waits. This is the command you will use most.
 
-| Flag | Values | Default |
-|---|---|---|
-| `--type` | `apk` \| `aab` \| `update` | `apk` |
-| `--profile` | `release` \| `debug` | `release` |
-| `--abi` | `arm64-v8a` \| `arm64-v8a,armeabi-v7a` \| `all` | `arm64-v8a` |
-| `--ota` | also export an OTA bundle | off |
-| `--release` | promote on success | off |
+| Flag | Values | Default | What it means |
+|---|---|---|---|
+| `--type` | `apk`, `aab`, `update` | `apk` | `apk` to sideload; `aab` for the Play Store (see section 8a about signing); `update` is OTA-only and skips Gradle entirely |
+| `--profile` | `release`, `debug` | `release` | `debug` is larger and slower but keeps dev tooling and is debuggable |
+| `--abi` | `arm64-v8a`, `arm64-v8a,armeabi-v7a`, `all` | `arm64-v8a` | CPU architectures to compile native code for. Each extra one recompiles the whole native graph |
+| `--ota` | flag | off | also export an OTA update bundle alongside the APK/AAB. Needed on the first build if you ever want to OTA-update from it |
+| `--release` | flag | off | if the build succeeds, promote it immediately (equivalent to running `axe release <id>` afterwards) |
 
 ```bash
 axe build                                   # release APK, arm64 only
 axe build --type apk --ota --release        # APK + OTA bundle, live immediately
-axe build --type update --release           # JS-only update, ~90 s
+axe build --type update --release           # JS-only update, ~90 s, no Gradle
 axe build --type aab --abi all              # Play Store bundle, every architecture
+axe build --profile debug                   # debuggable APK
 ```
 
-Never uploaded: `node_modules`, `.git`, `android`, `ios`, `.expo`, `dist`, `build`, `web-build`,
-`axe.json`, and any `.tgz`/`.apk`/`.aab` in the project root.
+**What actually happens, in order:**
+
+1. Reads `~/.axebuild/config.json` and `axe.json`. Missing either one is an immediate error telling
+   you which command to run.
+2. Warns if `app.json` has no `expo.android.package` — `expo prebuild` runs non-interactively on
+   the worker and will invent one, which changes your app's identity. (No warning if you use
+   `app.config.js`; the CLI does not evaluate it.)
+3. Tars the source and prints its size. **Never uploaded:** `node_modules`, `.git`, `android`,
+   `ios`, `.expo`, `dist`, `build`, `web-build`, `axe.json`, `mybuild.json`, and any `.tgz`,
+   `.apk` or `.aab` in the project root. `android/` and `ios/` are excluded because the worker runs
+   `expo prebuild` itself — anything you hand-edited in `android/` will not survive, so express it
+   through config plugins or `app.json` instead.
+4. Uploads, prints the build id and the dashboard URL, and deletes the local tarball.
+5. Polls `GET /api/builds/:id` every 3 seconds, printing each status change with elapsed seconds.
+
+```
+Packing project (source only — no node_modules)...
+Tarball: 2.4 MB
+Build queued: cmsc7msul000fijlf
+Dashboard: http://192.168.1.50:3000
+[2s] status: running
+[812s] status: success
+
+Build succeeded! Download your artifact:
+  http://192.168.1.50:3000/api/builds/cmsc7msul000fijlf/artifact?token=...
+or:
+  curl -OJ -H "Authorization: Bearer ..." http://192.168.1.50:3000/api/builds/.../artifact
+
+Not live yet. Promote it with:  axe release cmsc7msul000fijlf
+```
+
+On failure it prints the server's error, points at the dashboard for the full Gradle log, and exits
+`1` — so `axe build && ./deploy.sh` behaves the way you would expect in a script.
+
+**Ctrl-C only stops the waiting, not the build.** The work is queued on the server; close the
+terminal and it carries on. Pick it up again on the dashboard, or with
+`axe cancel <buildId>` if you meant to stop it.
+
+Only one build runs at a time. A second `axe build` queues behind the first and sits at `queued`,
+which is normal, not a hang.
 
 ### `axe cancel <buildId> [--force]`
 
-Stops a queued or running build. A queued one is dropped from the queue immediately; a running one
-is killed by the worker a few seconds later and recorded as `canceled`.
+Stops a queued or running build.
 
-`--force` marks the row canceled without waiting for the worker to confirm. Only use it on a build
-left `running` by a worker restart — on a genuinely running build it hides Gradle rather than
-stopping it.
+```bash
+axe cancel cmsc7msul000fijlf
+```
+
+A **queued** build is dropped from the queue immediately and the CLI says so. A **running** one is
+different: the worker has to kill the whole Gradle process group, which takes a few seconds, so the
+CLI reports `Cancel requested — the worker is stopping build ...`. It lands as `canceled`, not
+`failed`, because nothing was wrong with it, and the worker picks up the next build straight away.
+The workspace is deleted either way.
+
+`--force` marks the row `canceled` in the database without waiting for the worker to confirm. Use
+it **only** on a build stuck at `running` because the worker restarted underneath it. On a genuinely
+running build it hides Gradle from the dashboard instead of stopping it, and you are left with a
+build that is not really cancelled burning CPU.
 
 ### `axe rebuild <buildId> [--type] [--profile] [--abi] [--ota]`
 
-Queues the same uploaded source again, with optional overrides. Prints the new build id.
+Queues the same uploaded source again — no packing, no upload. The tarball is kept for as long as
+the build exists.
+
+| Flag | Effect |
+|---|---|
+| `--type`, `--profile`, `--abi` | override that setting; anything you omit is inherited from the original build |
+| `--ota` | also export an OTA bundle this time |
 
 ```bash
-axe rebuild cmsc7msul000f            # exactly the same again
-axe rebuild cmsc7msul000f --ota      # ...but with an OTA bundle this time
+axe rebuild cmsc7msul000fijlf              # identical settings
+axe rebuild cmsc7msul000fijlf --ota        # same source, now with an OTA bundle
+axe rebuild cmsc7msul000fijlf --abi all    # same source, every architecture
+axe rebuild cmsc7msul000fijlf --type aab   # same source, as a Play bundle
 ```
+
+It prints the **new** build id and returns straight away — it does not wait for the result, unlike
+`axe build`. The new build is fully independent: its own id, its own copy of the source, its own
+artifacts. Deleting either one leaves the other intact.
+
+Good for a Gradle failure that was really a flaky download, and for producing an `aab` from source
+you have already shipped as an `apk` without re-uploading a single byte.
 
 ### `axe release <buildId> [--apk] [--ota] [--undo]`
 
-Promote a successful build, or retire it.
+Promotes a successful build so installed apps start receiving it, or retires it. Section 9 explains
+the two channels; this is the reference.
+
+| Flags | What is changed |
+|---|---|
+| *(none)* | release whatever this build actually produced — the server decides |
+| `--apk` | APK channel only; the current OTA release is left alone |
+| `--ota` | OTA channel only; the current APK release is left alone |
+| `--undo` | retire from **both** channels — nothing is served from this build any more |
 
 ```bash
-axe release cmsc7msul000f            # whatever this build produced
-axe release cmsc7msul000f --ota      # OTA channel only
-axe release cmsc7msul000f --undo     # retire from both channels
+axe release cmsc7msul000fijlf            # whatever this build produced
+axe release cmsc7msul000fijlf --apk      # APK channel only
+axe release cmsc7msul000fijlf --ota      # OTA channel only
+axe release cmsc7msul000fijlf --undo     # retire from both
 ```
+
+Output tells you which channels moved and at what version:
+
+```
+Released to 'production': APK + OTA v1.4.0 (12)
+  APK channel: http://192.168.1.50:3000/api/apps/<slug>/latest
+  OTA runtimeVersion: 1.4.0
+```
+
+Two things worth watching in that output. `OTA runtimeVersion: (none — apps will NOT match this)`
+means the build has no resolvable runtime version and **no phone will ever receive it** — see
+section 10.3. And exactly one build per channel is live at a time, so releasing a new one silently
+retires the previous one (for OTA, only within the same `runtimeVersion`).
+
+Passing both `--apk` and `--ota` is the same as passing neither.
+
+### Not in the CLI yet
+
+Uploading a signing keystore, sending notifications, and deleting builds are dashboard or `curl`
+operations for now — sections 8a, 12 and 13.
 
 ---
 
@@ -1018,6 +1403,76 @@ most common causes, in order:
 | `Build timed out` | over `BUILD_TIMEOUT_MS` | usually a first build on a slow connection — just retry; the caches are warm now |
 | Something about `expo prebuild` and a package id | no `expo.android.package` | set it in `app.json` (section 6.4) |
 | A native module's code is missing after prebuild | it needs a config plugin, and the worker runs a bare `expo prebuild` | add the plugin to `expo.plugins` in your app config |
+| `Keystore was tampered with`, `Cannot recover key`, `No key with alias` | wrong keystore password or alias | re-upload it — section 8a has the full table |
+| A wall of stack traces ending in `No space left on device` | the server's disk filled up | see the next entry |
+
+### `No space left on device`
+
+The server's disk filled up mid-build. The log will be a wall of Java stack traces — Gradle failing
+to write `last-build.bin`, `executionHistory.bin`, its config-cache HTML report — but every one of
+them ends in the same line, and that is the only line that matters:
+
+```
+Caused by: java.io.IOException: No space left on device
+```
+
+Nothing is wrong with your app, your dependencies or your signing key. Builds usually die at the
+*end* of a long run, having already done 20+ minutes of real work.
+
+**Why it happened.** A build's workspace is far larger than the file it produces: the extracted
+source, `node_modules`, `expo prebuild`'s generated `android/`, and every intermediate object file
+Gradle and the NDK write on the way. `--abi all` multiplies the native part of that by four, since
+each architecture compiles the whole C++ graph again. A bundle that lands at 80 MB can need
+20 GB of scratch space to get there.
+
+The workspace itself is not the leak — it is deleted in a `finally` block, so it is already gone by
+the time you read the error. What filled the disk is everything that persists:
+
+| What | Grows to | Safe to delete? |
+|---|---|---|
+| `android-sdk` volume | ~15 GB | no — you would re-download it all |
+| `gradle-cache`, `npm-cache` | several GB, forever | yes, `make clean-cache` |
+| `ccache` | `CCACHE_MAXSIZE`, default 5 GB | yes, same command |
+| `artifacts` | every APK/AAB you have ever built, plus logs | yes, per build, from the dashboard |
+| `uploads` | one source tarball per build | goes with the build |
+| Docker's image + build cache | often many GB | yes, `docker system prune -af` |
+
+**Diagnose, on the server:**
+
+```bash
+df -h                    # which filesystem, and how bad
+docker system df -v      # per-volume and per-image breakdown
+```
+
+**Free space, cheapest first:**
+
+```bash
+docker system prune -af  # dangling images and Docker's build cache — usually the big win
+make clean-cache         # gradle-cache + npm-cache + ccache; they rebuild on demand
+make up                  # clean-cache stops the containers to release the volumes
+```
+
+then delete old builds from the dashboard — that is the only thing that removes artifacts,
+tarballs and logs, and it tells you how much each one freed (section 13).
+
+**Then avoid it next time.** Leave **~30 GB free** before an `--abi all` build. Better, do not ask
+for `all` unless you need it: `--abi arm64-v8a,armeabi-v7a` covers every real phone, halves the
+native output, and Play still splits the bundle per device so users download no more than they
+would have.
+
+```bash
+axe build --type aab --abi arm64-v8a,armeabi-v7a
+axe rebuild <buildId> --abi arm64-v8a,armeabi-v7a   # same source, no re-upload
+```
+
+A build killed this way is safe to re-run: no state survived it.
+
+### Google Play rejects the bundle
+
+Almost always one of two things, both covered in [section 8a](#8a-signing-for-the-play-store-keystores):
+no upload key is configured for that project (so the bundle is debug-signed), or the key on the
+server is not the one the app is enrolled with. `keytool -printcert -jarfile app-release.aab` tells
+you which, before you spend another upload finding out.
 
 ### The build is stuck at `queued`
 
@@ -1077,3 +1532,8 @@ is not public. Both are working as designed — re-run the verification block in
 | **runtimeVersion** | the compatibility key between a JS bundle and the native binary running it |
 | **versionCode** | the integer Android uses to order installs. Must increase per released APK |
 | **APK / AAB** | the installable file / the Play Store upload format |
+| **keystore** | a `.jks` file holding one or more signing keys, protected by a password |
+| **alias** | the name of one key inside a keystore. You need it, exactly, to sign with that key |
+| **debug key** | the throwaway key the Android SDK signs with by default. Fine to sideload, rejected by Play |
+| **upload key** | the key *you* generate and sign Play uploads with (section 8a) |
+| **app signing key** | the key Google holds and re-signs your app with before it reaches phones |

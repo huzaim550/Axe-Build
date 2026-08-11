@@ -98,7 +98,9 @@ axe build --type apk --profile release
 
 The CLI tars only your source (excludes `node_modules`, `.git`, `android/`, `ios/`, `.expo`), uploads it, and polls until the build finishes. The first build downloads all npm + Gradle dependencies and takes a long time (20–40 min on modest hardware); later builds reuse the `gradle-cache`/`npm-cache` volumes and are much faster.
 
-Output types: `--type apk|aab`, `--profile release|debug`, `--abi arm64-v8a|all`. Phase 0 builds are **unsigned-release/debug-keystore** APKs — fine for sideloading and testing. Keystore signing is Phase 2.
+Output types: `--type apk|aab|update`, `--profile release|debug`, `--abi arm64-v8a|all`. Every flag of every command is documented in [DOCS.md § 15](DOCS.md#15-cli-reference).
+
+APKs are signed with the standard Android **debug keystore** — fine for sideloading onto your own devices, and rejected by the Play Store. See below.
 
 A build you started by mistake can be stopped with **Cancel** (or `axe cancel <buildId>`), and any
 build can be run again from the source the server already has with **Rebuild** (or
@@ -110,6 +112,32 @@ Builds target only `arm64-v8a` by default and skip Android lint, and the worker 
 repeat native compilation is nearly free. A first build of a project takes ~20–30 min; later builds
 of the same project land around 8–15 min. Pass `--abi all` when you need an APK that also runs on
 x86 emulators or 32-bit phones, at the cost of a much longer build.
+
+## Play Store signing
+
+Sideloading needs no key. **Uploading to Google Play does**: Google refuses a debug-signed bundle,
+because the debug key is public and proves nothing about who wrote the app. Generate an upload key
+once per app, keep a backup somewhere that is not this server, and hand a copy to the server:
+
+```bash
+keytool -genkeypair -v -keystore myapp-upload.jks -alias myapp \
+  -keyalg RSA -keysize 2048 -validity 10000
+
+curl -X POST http://<server>:3000/api/projects/<slug>/keystore \
+  -H "Authorization: Bearer $LOCAL_TOKEN" \
+  -F keystore=@myapp-upload.jks -F keyAlias=myapp \
+  --form-string storePassword="$STORE_PASS"
+```
+
+From then on every `--type aab` build for that project is signed with it, and the build log names
+the alias it used. **`apk` builds are deliberately left on the debug key** — signing those too
+would change the signature of the sideloaded flavour, and Android refuses an update signed by a
+different key, so every existing install would have to be uninstalled to recover.
+
+The `keystores` volume is not disposable and `make nuke` takes it: back it up.
+[DOCS.md § 8a](DOCS.md#8a-signing-for-the-play-store-keystores) walks through the whole thing —
+where `keytool` comes from, what each prompt wants, upload key vs. Play app signing key,
+verifying an `.aab` before you spend an upload on it, and what each signing error actually means.
 
 ## Updates
 
@@ -241,4 +269,4 @@ project keeps building without being re-linked.
 
 - No `pnpm-lock.yaml` is committed yet; images run `pnpm install` against the version ranges in the package manifests. After your first successful image build you can generate and commit a lockfile for reproducibility.
 - Concurrency is fixed at 1 build at a time on purpose.
-- Live log streaming (SSE), a per-build log console + progress bar, Cancel and Rebuild are all in. Phase 2 (keystore signing) is not built yet. The worker writes the full build log to the `artifacts` volume (`build.log` next to each artifact) regardless of what the dashboard shows.
+- Live log streaming (SSE), a per-build log console + progress bar, Cancel, Rebuild and per-project keystore signing for `aab` builds are all in. Uploading a keystore is a `curl` call for now — there is no `axe keystore` command and no dashboard form. The worker writes the full build log to the `artifacts` volume (`build.log` next to each artifact) regardless of what the dashboard shows.
