@@ -1,23 +1,31 @@
 #!/usr/bin/env node
+import { spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { Command } from "commander";
 import {
   cancelBuild,
   createProject,
+  deleteKeystore,
   getBuild,
+  getKeystore,
+  listBuilds,
   listProjects,
   rebuildBuild,
   releaseBuild,
+  setKeystore,
   uploadBuild,
 } from "./api.js";
+import { ABI_CHOICES, resolveAbi } from "./abi.js";
 import {
+  type GlobalConfig,
   loadGlobalConfig,
   loadProjectConfig,
   saveGlobalConfig,
   saveProjectConfig,
 } from "./config.js";
 import { packProject } from "./pack.js";
+import { promptSecret } from "./prompt.js";
 
 const program = new Command();
 
@@ -90,19 +98,16 @@ program
 program
   .command("build")
   .description("Tar the project source, upload it, and wait for the build to finish")
-  .option("--type <type>", "apk | aab | update (OTA-only: no Gradle, ~90s)", "apk")
-  .option("--profile <profile>", "release | debug", "release")
-  .option(
-    "--abi <abi>",
-    "arm64-v8a | arm64-v8a,armeabi-v7a | all — fewer ABIs build much faster",
-    "arm64-v8a",
-  )
+  .option("-t, --type <type>", "apk | aab | update (OTA-only: no Gradle, ~90s)", "apk")
+  .option("-p, --profile <profile>", "release | debug", "release")
+  .option("-a, --abi <abi>", `${ABI_CHOICES} — fewer ABIs build much faster`, "arm64")
   .option("--ota", "also export an OTA update bundle alongside the apk/aab")
-  .option("--release", "promote this build to the update channels once it succeeds")
+  .option("-r, --release", "promote this build to the update channels once it succeeds")
   .action(async (opts: { type: string; profile: string; abi: string; ota?: boolean; release?: boolean }) => {
     const cfg = loadGlobalConfig();
     const cwd = process.cwd();
     const { projectSlug } = loadProjectConfig(cwd);
+    const abi = resolveAbi(opts.abi);
 
     await warnIfNoAndroidPackage(cwd);
 
@@ -115,7 +120,7 @@ program
       projectSlug,
       buildType: opts.type,
       profile: opts.profile,
-      abi: opts.abi,
+      abi,
       ota: Boolean(opts.ota),
       tarball,
     });
@@ -169,10 +174,11 @@ program
 program
   .command("cancel")
   .description("Stop a queued or running build")
-  .argument("<buildId>")
+  .argument("<buildId>", "build id, or 'last' for this project's most recent build")
   .option("--force", "mark it canceled without waiting for the worker (stuck rows only)")
-  .action(async (buildId: string, opts: { force?: boolean }) => {
+  .action(async (idOrLast: string, opts: { force?: boolean }) => {
     const cfg = loadGlobalConfig();
+    const buildId = await resolveBuildId(cfg, idOrLast);
     const r = await cancelBuild(cfg, buildId, Boolean(opts.force));
     // "canceling" means the worker was asked to kill Gradle and hasn't finished
     // yet — saying "canceled" here would be a lie for another few seconds.
@@ -186,21 +192,22 @@ program
 program
   .command("rebuild")
   .description("Queue the same source again, without re-uploading it")
-  .argument("<buildId>")
-  .option("--type <type>", "override the build type (apk | aab | update)")
-  .option("--profile <profile>", "override the profile (release | debug)")
-  .option("--abi <abi>", "override the ABI list")
+  .argument("<buildId>", "build id, or 'last' for this project's most recent build")
+  .option("-t, --type <type>", "override the build type (apk | aab | update)")
+  .option("-p, --profile <profile>", "override the profile (release | debug)")
+  .option("-a, --abi <abi>", `override the ABIs (${ABI_CHOICES})`)
   .option("--ota", "also export an OTA bundle this time")
   .action(
     async (
-      buildId: string,
+      idOrLast: string,
       opts: { type?: string; profile?: string; abi?: string; ota?: boolean },
     ) => {
       const cfg = loadGlobalConfig();
+      const buildId = await resolveBuildId(cfg, idOrLast);
       const { buildId: newId } = await rebuildBuild(cfg, buildId, {
         buildType: opts.type,
         profile: opts.profile,
-        abi: opts.abi,
+        abi: opts.abi === undefined ? undefined : resolveAbi(opts.abi),
         ota: opts.ota,
       });
       console.log(`Queued ${newId} from ${buildId}.`);
@@ -211,12 +218,13 @@ program
 program
   .command("release")
   .description("Promote a successful build so installed apps start receiving it")
-  .argument("<buildId>")
+  .argument("<buildId>", "build id, or 'last' for this project's most recent build")
   .option("--apk", "release only the APK (leave the current OTA bundle in place)")
   .option("--ota", "release only the OTA bundle (leave the current APK in place)")
   .option("--undo", "retire this build from both channels")
-  .action(async (buildId: string, opts: { apk?: boolean; ota?: boolean; undo?: boolean }) => {
+  .action(async (idOrLast: string, opts: { apk?: boolean; ota?: boolean; undo?: boolean }) => {
     const cfg = loadGlobalConfig();
+    const buildId = await resolveBuildId(cfg, idOrLast);
 
     // No flags = release whatever this build actually produced (server decides).
     let what: { apk?: boolean; update?: boolean } = {};
@@ -237,6 +245,125 @@ program
       console.log(`  OTA runtimeVersion: ${r.runtimeVersion ?? "(none — apps will NOT match this)"}`);
     }
   });
+
+const keystore = program
+  .command("keystore")
+  .description("The upload key this project's aab builds are signed with (Play Store)");
+
+keystore
+  .command("show", { isDefault: true })
+  .description("Is an upload key configured for this project?")
+  .action(async () => {
+    const cfg = loadGlobalConfig();
+    const { projectSlug } = loadProjectConfig(process.cwd());
+    const ks = await getKeystore(cfg, projectSlug);
+    if (!ks.configured) {
+      console.log(`No upload key for '${projectSlug}'.`);
+      console.log(`  aab builds will be debug-signed, and Google Play rejects those.`);
+      console.log(`  Add one with:  axe keystore set <file.jks>`);
+      return;
+    }
+    console.log(`Upload key configured for '${projectSlug}':`);
+    console.log(`  alias: ${ks.keyAlias}`);
+    console.log(`  file:  ${ks.file}`);
+  });
+
+keystore
+  .command("set")
+  .description("Upload a .jks so this project's aab builds are signed with it")
+  .argument("<file>", "path to the keystore (.jks) file")
+  .option("--alias <alias>", "key alias inside the keystore (auto-detected if there is only one)")
+  .option("--key-password", "prompt for a separate key password (default: same as the store password)")
+  .action(async (file: string, opts: { alias?: string; keyPassword?: boolean }) => {
+    const cfg = loadGlobalConfig();
+    const { projectSlug } = loadProjectConfig(process.cwd());
+
+    const resolved = path.resolve(file);
+    const bytes = await fs.readFile(resolved).catch(() => {
+      throw new Error(`No such keystore file: ${resolved}`);
+    });
+
+    const storePassword = await promptSecret("Keystore password: ");
+    if (!storePassword) throw new Error("A keystore password is required.");
+    const keyPassword = opts.keyPassword
+      ? await promptSecret("Key password: ")
+      : undefined;
+
+    // Typing the alias from memory is the step people get wrong, and the error
+    // it produces surfaces deep inside Gradle an hour later. keytool already
+    // knows it; ask, and only fall back to demanding --alias.
+    const keyAlias = opts.alias ?? soleAliasIn(resolved, storePassword);
+    if (!keyAlias) {
+      throw new Error(
+        "Could not work out the key alias — pass it explicitly:\n" +
+          `  axe keystore set ${file} --alias <alias>\n` +
+          `  (list them with: keytool -list -keystore ${file})`,
+      );
+    }
+
+    const r = await setKeystore(cfg, projectSlug, {
+      file: bytes,
+      filename: path.basename(resolved),
+      keyAlias,
+      storePassword,
+      keyPassword,
+    });
+    console.log(`Upload key stored for '${projectSlug}' (alias ${r.keyAlias}).`);
+    console.log(`Every 'axe build --type aab' for this project is now signed with it.`);
+    console.log(`Back up ${path.basename(resolved)} and its password somewhere off this machine.`);
+  });
+
+keystore
+  .command("rm")
+  .description("Remove this project's upload key — aab builds go back to being debug-signed")
+  .action(async () => {
+    const cfg = loadGlobalConfig();
+    const { projectSlug } = loadProjectConfig(process.cwd());
+    const before = await getKeystore(cfg, projectSlug);
+    if (!before.configured) {
+      console.log(`No upload key for '${projectSlug}' — nothing to remove.`);
+      return;
+    }
+    await deleteKeystore(cfg, projectSlug);
+    console.log(`Removed the upload key for '${projectSlug}' (was alias ${before.keyAlias}).`);
+    console.log(`The server's copy is gone. Your own .jks is untouched — do not lose it.`);
+  });
+
+/**
+ * The one alias in a keystore, or null if that cannot be established.
+ *
+ * The password goes in on stdin, never on the argv: keytool accepts -storepass
+ * but anything passed that way is readable in `ps` by every user on the box.
+ * A localised or absent keytool just means we ask for --alias instead.
+ */
+function soleAliasIn(file: string, storePassword: string): string | null {
+  const r = spawnSync("keytool", ["-list", "-keystore", file], {
+    input: `${storePassword}\n`,
+    encoding: "utf8",
+  });
+  if (r.error || r.status !== 0 || !r.stdout) return null;
+
+  const aliases = r.stdout
+    .split("\n")
+    .filter((line) => line.includes("PrivateKeyEntry"))
+    .map((line) => line.split(",")[0]?.trim())
+    .filter((a): a is string => Boolean(a));
+
+  return aliases.length === 1 ? aliases[0]! : null;
+}
+
+/** Accepts a real build id, or `last` for the newest build of the current project. */
+async function resolveBuildId(cfg: GlobalConfig, idOrLast: string): Promise<string> {
+  if (idOrLast !== "last") return idOrLast;
+
+  const { projectSlug } = loadProjectConfig(process.cwd());
+  const builds = await listBuilds(cfg);
+  // The list is newest-first, so the first match is the one meant by "last".
+  const mine = builds.find((b) => b.project?.slug === projectSlug);
+  if (!mine) throw new Error(`No builds yet for '${projectSlug}'.`);
+  console.log(`last = ${mine.id} (${mine.buildType}, ${mine.status})`);
+  return mine.id;
+}
 
 function describeRelease(r: {
   releasedApk?: boolean;

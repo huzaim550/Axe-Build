@@ -362,12 +362,16 @@ terminal and the build carries on.
 |---|---|---|---|
 | `--type` | `apk`, `aab`, `update` | `apk` | `aab` is for the Play Store, and needs a signing key first (section 8a); `update` is OTA-only and skips Gradle entirely (~90 s) |
 | `--profile` | `release`, `debug` | `release` | `debug` is bigger and slower but keeps dev tooling |
-| `--abi` | `arm64-v8a`, `arm64-v8a,armeabi-v7a`, `all` | `arm64-v8a` | CPU architectures to compile. Each extra one recompiles the whole native graph |
+| `-a`, `--abi` | `arm64`, `phone`, `all` | `arm64` | CPU architectures to compile. Each extra one recompiles the whole native graph |
 | `--ota` | flag | off | also export an OTA bundle alongside the APK (needed for the first OTA-capable build) |
-| `--release` | flag | off | promote it automatically if it succeeds |
+| `-r`, `--release` | flag | off | promote it automatically if it succeeds |
 
-`arm64-v8a` covers essentially every Android phone made in the last several years. Use `--abi all`
-only when you need x86 emulators or 32-bit devices, and expect a much longer build.
+The `-a` values are short names for real ABI lists: `arm64` → `arm64-v8a`, `phone` →
+`arm64-v8a,armeabi-v7a`, `all` → all four. `arm64` covers essentially every Android phone made in
+the last several years; `phone` adds old 32-bit devices. Use `all` only when you need x86 emulators
+or Chromebooks, and expect a much longer build and a lot more scratch disk.
+
+Building for the Play Store is `-t aab` plus a signing key, and has its own section — **8a**.
 
 ### How long it takes
 
@@ -385,6 +389,7 @@ in the queue.
 Press **Cancel** on the build (or on its row), or:
 
 ```bash
+axe cancel last                          # 'last' = this project's most recent build
 axe cancel cmsc7msul000fijlf
 ```
 
@@ -399,9 +404,10 @@ The source you uploaded is kept for as long as the build exists, so you can run 
 server:
 
 ```bash
-axe rebuild cmsc7msul000fijlf            # identical settings
-axe rebuild cmsc7msul000fijlf --ota      # same source, this time with an OTA bundle
-axe rebuild cmsc7msul000fijlf --abi all  # same source, every architecture
+axe rebuild last                         # identical settings
+axe rebuild last --ota                   # same source, this time with an OTA bundle
+axe rebuild last -a phone                # same source, fewer architectures
+axe rebuild cmsc7msul000fijlf            # or name the build explicitly
 ```
 
 or press **Rebuild** on the build page. This creates a *new* build with its own id and its own
@@ -439,6 +445,52 @@ the trap section 8a exists to keep you out of.
 ---
 
 ## 8a. Signing for the Play Store (keystores)
+
+### The short version
+
+Four commands, start to finish. Each one is explained in full below; this is the copy-paste path
+for a phone app going to Google Play.
+
+```bash
+# 1. Make an upload key (once per app, on your own machine — not the server).
+#    It asks for a password and some certificate details. Answer them; they cannot be changed later.
+keytool -genkeypair -v \
+  -keystore ~/keys/myapp-upload.jks -alias myapp \
+  -keyalg RSA -keysize 2048 -validity 10000
+
+# 2. BACK IT UP — the file and the password — somewhere that is not this laptop
+#    and not the build server.
+
+# 3. Give a copy to the build server (once per project). Prompts for the password;
+#    the alias is read out of the keystore, so there is nothing to remember.
+axe keystore set ~/keys/myapp-upload.jks
+
+# 4. Build the bundle, from the project folder.
+axe build -t aab -a phone
+```
+
+Then check the log said `==> Signing with this project's upload key (alias myapp)`, download the
+`.aab`, and upload it in the Play Console under **Release → Production → Create new release**.
+
+> **Keep the `.jks` outside the project folder.** `axe build` tars the whole working tree, and
+> `.jks` is not in the exclusion list — a key sitting in your project root is uploaded to the build
+> server inside every source tarball, on every build, forever. `~/keys/` (`mkdir -p ~/keys &&
+> chmod 700 ~/keys`) is a fine home for it. Gitignoring it is not enough; git is not what packs the
+> tarball.
+
+**On `-a phone`:** that is `arm64-v8a,armeabi-v7a`, the right choice for a phone app. `x86`/`x86_64`
+exist for emulators and a handful of Chromebooks, and including them doubles the native compilation,
+the build time and the scratch space a build needs — which is the usual cause of a
+[`No space left on device`](#no-space-left-on-device) failure. Play splits the bundle per device
+either way, so users never download an architecture they cannot run.
+
+```bash
+axe build -t aab -a phone   # arm64-v8a,armeabi-v7a — phones, the default choice
+axe build -t aab -a arm64   # arm64-v8a only; lightest, every phone from ~2015 on
+axe build -t aab -a all     # adds x86,x86_64 for emulators and Chromebooks
+```
+
+Steps 1 and 3 are done **once per app, ever**. After that, shipping a new version is only step 4.
 
 ### Why you need a key at all
 
@@ -563,70 +615,80 @@ cp myapp-upload.jks ~/backups/       # and an offline copy — USB, external dis
 
 - Put the alias and the passwords **with** the file. A keystore whose password you have forgotten
   is exactly as useless as no keystore.
-- **Never commit it to git.** Add `*.jks` and `*.keystore` to your project's `.gitignore`.
+- **Keep it out of the project folder entirely** — `~/keys/` rather than next to `app.json`.
+  Gitignoring `*.jks` stops the commit but not the upload: `axe build` tars the working tree and
+  does not exclude `.jks`, so a key in the project root travels to the build server in every
+  source tarball you ever produce.
 - Do not treat the build server as the backup. It is the *consumer* of the key, and `make nuke`
   deletes the volume it lives in.
 
 ### Step 4 — give the key to the build server (once per project)
 
-There is no `axe keystore` command yet; this is a plain HTTP upload. You need the project's
-**slug** — it is in `axe.json` in your project folder, and on the dashboard.
+From your project folder — the one with `axe.json`, which is where the slug comes from:
 
 ```bash
-curl -X POST http://192.168.1.50:3000/api/projects/my-cool-app/keystore \
-  -H "Authorization: Bearer $LOCAL_TOKEN" \
-  -F keystore=@myapp-upload.jks \
-  -F keyAlias=myapp \
-  --form-string storePassword="$STORE_PASS" \
-  --form-string keyPassword="$KEY_PASS"
+axe keystore set ~/keys/myapp-upload.jks
 ```
 
-| Field | Required | Notes |
-|---|---|---|
-| `keystore` | yes | the `.jks` file itself — note the `@`, which tells curl to send the file. Max 1 MB. |
-| `keyAlias` | yes | the `-alias` from step 2, character for character. |
-| `storePassword` | yes | the keystore password. |
-| `keyPassword` | no | the key's own password. **Omit it if it is the same as the store password** — the server falls back to `storePassword`. |
+That is the whole command. It prompts:
 
-Use `--form-string` for the passwords rather than `-F`. With `-F`, a value that begins with `@` or
-`<` is read as a *filename*, so a password like `@rsenal99` would be silently mangled.
-
-A successful response:
-
-```json
-{ "configured": true, "keyAlias": "myapp", "file": "my-cool-app.jks" }
 ```
+Keystore password: 
+Upload key stored for 'my-cool-app' (alias myapp).
+Every 'axe build --type aab' for this project is now signed with it.
+Back up myapp-upload.jks and its password somewhere off this machine.
+```
+
+Three things it does so you do not have to:
+
+- **The password is prompted, never typed as an argument** — so it stays out of your shell history
+  and out of `ps`. Piping also works (`echo "$PW" | axe keystore set key.jks`) for a script.
+- **The alias is read out of the keystore.** Getting it wrong is the classic mistake, and the error
+  it causes surfaces deep inside Gradle an hour later. If the file holds more than one key — or
+  `keytool` is not installed — it asks you for `--alias` instead.
+- **The slug comes from `axe.json`**, so there is no URL to assemble.
+
+| Flag | When you need it |
+|---|---|
+| `--alias <alias>` | the keystore holds more than one key, or auto-detection failed |
+| `--key-password` | the key has its own password, different from the store password (you did **not** press Enter at keytool's last prompt) |
+
+The other two:
+
+```bash
+axe keystore        # what is configured? (alias and filename — never the passwords)
+axe keystore rm     # remove it; aab builds go back to being debug-signed
+```
+
+Replacing a key is just `axe keystore set` again — the stored file is named after the project, so
+the old one is overwritten rather than left on the volume.
+
+> Replacing the key of an app that is **already on Play** is not just this command — you have to
+> register the new upload key with Google as well, from the Play Console. Do that first.
 
 What the server does with it: the file is written to the `keystores` volume as
 `/data/keystores/<slug>.jks` with mode `0600`, and the alias and passwords go into the database.
-The worker container mounts that volume **read-only**.
-
-Managing it afterwards — same URL, different verbs:
-
-```bash
-# What is configured? (alias and filename only — the passwords are never returned)
-curl -H "Authorization: Bearer $LOCAL_TOKEN" \
-  http://192.168.1.50:3000/api/projects/my-cool-app/keystore
-
-# Replace it: POST again. The file is named after the project, so the old one is overwritten
-# rather than left lying around.
-
-# Remove it: the row goes first, then the file — the next aab build is debug-signed again.
-curl -X DELETE -H "Authorization: Bearer $LOCAL_TOKEN" \
-  http://192.168.1.50:3000/api/projects/my-cool-app/keystore
-```
-
-> Replacing the key of an app that is **already on Play** is not just a POST here — you have to
-> register the new upload key with Google as well, from the Play Console. Do that first.
+The worker container mounts that volume **read-only**. The underlying HTTP endpoint is in
+section 16 if you would rather script it directly.
 
 ### Step 5 — build a bundle
 
 ```bash
-axe build --type aab --abi all
+axe build -t aab -a phone
 ```
 
-`--abi all` is the usual choice for Play: Google splits the bundle per device, so users still only
-download the slice they need, and you have not excluded anyone with a 32-bit or x86 device.
+Google splits the bundle per device, so each user downloads only the slice their phone can run —
+the ABIs you compile decide who is *offered* the app, not how big anyone's download is.
+
+| `-a` | Compiles | Who gets the app | Cost |
+|---|---|---|---|
+| `arm64` | `arm64-v8a` | every Android phone from roughly 2015 onward | lightest and fastest |
+| `phone` | `arm64-v8a,armeabi-v7a` | the above, plus old and budget 32-bit devices | **the right default for a phone app** |
+| `all` | `+ x86,x86_64` | the above, plus emulators and some Chromebooks | doubles native compilation, build time and scratch disk |
+
+Reach for `all` only if you actually care about emulator or Chromebook users. It is the heaviest
+thing this server can be asked to do and the usual trigger for
+[`No space left on device`](#no-space-left-on-device); leave ~30 GB free before trying it.
 
 In the build log you will see either
 
@@ -1067,15 +1129,32 @@ hostname → one service and let the app do the filtering.
 ## 15. CLI reference
 
 ```
-axe login    <url> [--token <token>]
-axe init     [--name <name>] [--slug <slug>]
-axe build    [--type] [--profile] [--abi] [--ota] [--release]
-axe cancel   <buildId> [--force]
-axe rebuild  <buildId> [--type] [--profile] [--abi] [--ota]
-axe release  <buildId> [--apk] [--ota] [--undo]
+axe login     <url> [--token <token>]
+axe init      [--name <name>] [--slug <slug>]
+axe build     [-t type] [-p profile] [-a abi] [--ota] [-r]
+axe cancel    <buildId|last> [--force]
+axe rebuild   <buildId|last> [-t type] [-p profile] [-a abi] [--ota]
+axe release   <buildId|last> [--apk] [--ota] [--undo]
+axe keystore  [show] | set <file> [--alias] [--key-password] | rm
 ```
 
 `axe --help` lists these; `axe <command> --help` shows one command's flags.
+
+**Three things exist so you do not have to remember much:**
+
+| Instead of | Type |
+|---|---|
+| `--type`, `--profile`, `--abi`, `--release` | `-t`, `-p`, `-a`, `-r` |
+| `--abi arm64-v8a,armeabi-v7a` | `-a phone` (also `-a arm64`, `-a all`) |
+| a 25-character build id | `last` — this project's most recent build |
+
+```bash
+axe build -t aab -a phone     # = axe build --type aab --abi arm64-v8a,armeabi-v7a
+axe release last              # prints which id it resolved to before acting
+```
+
+`last` reads `axe.json`, so it always means *this project's* newest build even when other projects
+have built since.
 
 ### How the CLI finds things
 
@@ -1168,18 +1247,23 @@ Packs the current project, uploads it, and waits. This is the command you will u
 
 | Flag | Values | Default | What it means |
 |---|---|---|---|
-| `--type` | `apk`, `aab`, `update` | `apk` | `apk` to sideload; `aab` for the Play Store (see section 8a about signing); `update` is OTA-only and skips Gradle entirely |
-| `--profile` | `release`, `debug` | `release` | `debug` is larger and slower but keeps dev tooling and is debuggable |
-| `--abi` | `arm64-v8a`, `arm64-v8a,armeabi-v7a`, `all` | `arm64-v8a` | CPU architectures to compile native code for. Each extra one recompiles the whole native graph |
+| `-t`, `--type` | `apk`, `aab`, `update` | `apk` | `apk` to sideload; `aab` for the Play Store (see section 8a about signing); `update` is OTA-only and skips Gradle entirely |
+| `-p`, `--profile` | `release`, `debug` | `release` | `debug` is larger and slower but keeps dev tooling and is debuggable |
+| `-a`, `--abi` | `arm64`, `phone`, `all` | `arm64` | CPU architectures to compile native code for. Each extra one recompiles the whole native graph |
 | `--ota` | flag | off | also export an OTA update bundle alongside the APK/AAB. Needed on the first build if you ever want to OTA-update from it |
-| `--release` | flag | off | if the build succeeds, promote it immediately (equivalent to running `axe release <id>` afterwards) |
+| `-r`, `--release` | flag | off | if the build succeeds, promote it immediately (equivalent to running `axe release <id>` afterwards) |
+
+The `-a` names expand to real ABI lists: `arm64` → `arm64-v8a`, `phone` →
+`arm64-v8a,armeabi-v7a`, `all` → all four. The expansion happens in the CLI, so an unknown value
+is rejected before anything is packed or uploaded, with the three valid ones printed.
 
 ```bash
-axe build                                   # release APK, arm64 only
-axe build --type apk --ota --release        # APK + OTA bundle, live immediately
-axe build --type update --release           # JS-only update, ~90 s, no Gradle
-axe build --type aab --abi all              # Play Store bundle, every architecture
-axe build --profile debug                   # debuggable APK
+axe build                     # release APK, arm64 only
+axe build --ota -r            # APK + OTA bundle, live immediately
+axe build -t update -r        # JS-only update, ~90 s, no Gradle
+axe build -t aab -a phone     # Play Store bundle for phones (section 8a)
+axe build -t aab -a all       # ...plus x86/x86_64 for emulators — much heavier
+axe build -p debug            # debuggable APK
 ```
 
 **What actually happens, in order:**
@@ -1223,11 +1307,12 @@ terminal and it carries on. Pick it up again on the dashboard, or with
 Only one build runs at a time. A second `axe build` queues behind the first and sits at `queued`,
 which is normal, not a hang.
 
-### `axe cancel <buildId> [--force]`
+### `axe cancel <buildId|last> [--force]`
 
 Stops a queued or running build.
 
 ```bash
+axe cancel last                  # the one you just started
 axe cancel cmsc7msul000fijlf
 ```
 
@@ -1242,21 +1327,21 @@ it **only** on a build stuck at `running` because the worker restarted underneat
 running build it hides Gradle from the dashboard instead of stopping it, and you are left with a
 build that is not really cancelled burning CPU.
 
-### `axe rebuild <buildId> [--type] [--profile] [--abi] [--ota]`
+### `axe rebuild <buildId|last> [-t] [-p] [-a] [--ota]`
 
 Queues the same uploaded source again — no packing, no upload. The tarball is kept for as long as
 the build exists.
 
 | Flag | Effect |
 |---|---|
-| `--type`, `--profile`, `--abi` | override that setting; anything you omit is inherited from the original build |
+| `-t`, `-p`, `-a` | override type / profile / ABIs; anything you omit is inherited from the original build |
 | `--ota` | also export an OTA bundle this time |
 
 ```bash
-axe rebuild cmsc7msul000fijlf              # identical settings
-axe rebuild cmsc7msul000fijlf --ota        # same source, now with an OTA bundle
-axe rebuild cmsc7msul000fijlf --abi all    # same source, every architecture
-axe rebuild cmsc7msul000fijlf --type aab   # same source, as a Play bundle
+axe rebuild last                  # the same thing again — the common case after a flaky failure
+axe rebuild last -a phone         # same source, fewer architectures
+axe rebuild last -t aab           # same source, as a Play bundle
+axe rebuild cmsc7msul000fijlf --ota
 ```
 
 It prints the **new** build id and returns straight away — it does not wait for the result, unlike
@@ -1266,7 +1351,7 @@ artifacts. Deleting either one leaves the other intact.
 Good for a Gradle failure that was really a flaky download, and for producing an `aab` from source
 you have already shipped as an `apk` without re-uploading a single byte.
 
-### `axe release <buildId> [--apk] [--ota] [--undo]`
+### `axe release <buildId|last> [--apk] [--ota] [--undo]`
 
 Promotes a successful build so installed apps start receiving it, or retires it. Section 9 explains
 the two channels; this is the reference.
@@ -1279,8 +1364,8 @@ the two channels; this is the reference.
 | `--undo` | retire from **both** channels — nothing is served from this build any more |
 
 ```bash
-axe release cmsc7msul000fijlf            # whatever this build produced
-axe release cmsc7msul000fijlf --apk      # APK channel only
+axe release last                         # whatever the build you just ran produced
+axe release last --apk                   # APK channel only
 axe release cmsc7msul000fijlf --ota      # OTA channel only
 axe release cmsc7msul000fijlf --undo     # retire from both
 ```
@@ -1300,10 +1385,45 @@ retires the previous one (for OTA, only within the same `runtimeVersion`).
 
 Passing both `--apk` and `--ota` is the same as passing neither.
 
+### `axe keystore [show] | set <file> | rm`
+
+The upload key this project's `aab` builds are signed with. Section 8a is the full story; this is
+the reference. All three read the slug from `axe.json`, so they take no URL and no token.
+
+```bash
+axe keystore                            # or: axe keystore show
+axe keystore set ~/keys/myapp.jks
+axe keystore rm
+```
+
+**`axe keystore`** (the default) prints the configured alias and stored filename, or, if there is
+none, says so and reminds you that `aab` builds are being debug-signed. Passwords are never
+returned by the server, so they are never printed.
+
+**`axe keystore set <file>`** uploads the keystore and stores it against this project.
+
+| Flag | When you need it |
+|---|---|
+| `--alias <alias>` | the keystore holds more than one key, or `keytool` is missing so auto-detection could not run |
+| `--key-password` | prompt for a second password because the key has its own, different from the store password |
+
+The store password is **prompted, never an argument** — a password on the command line lands in
+shell history and is visible in `ps` to every user on the machine. When stdin is not a terminal the
+password is read as a plain line instead, so `echo "$PW" | axe keystore set key.jks` works in a
+script without a second code path.
+
+The alias is read out of the keystore with `keytool -list` (the password goes in on stdin there
+too, for the same reason). If exactly one key is found, that is the alias; otherwise you are asked
+for `--alias`. This exists because a mistyped alias is not caught anywhere until Gradle fails with
+`No key with alias` — an hour into a build.
+
+**`axe keystore rm`** deletes the server's copy and its database row; your own `.jks` is untouched.
+The next `aab` build is debug-signed again. It says which alias it removed, so you have a record if
+that was a mistake.
+
 ### Not in the CLI yet
 
-Uploading a signing keystore, sending notifications, and deleting builds are dashboard or `curl`
-operations for now — sections 8a, 12 and 13.
+Sending notifications and deleting builds are dashboard or `curl` operations — sections 12 and 13.
 
 ---
 
@@ -1319,9 +1439,9 @@ marked **public**. Public routes are read-only, and are the only ones reachable 
 | `POST /api/projects` | `{ name }` | `{ id, slug, name }` |
 | `GET /api/projects` | — | every project + build count |
 | `DELETE /api/projects/:slug` | — | deletes an **empty** project; `409` if it has builds |
-| `GET /api/projects/:slug/keystore` | — | whether an upload key is configured (alias + filename, never passwords) |
-| `POST /api/projects/:slug/keystore` | multipart: `keystore`, `keyAlias`, `storePassword`, `keyPassword?` | stores it; `aab` builds are signed with it |
-| `DELETE /api/projects/:slug/keystore` | — | removes the row and the file |
+| `GET /api/projects/:slug/keystore` | — | whether an upload key is configured (alias + filename, never passwords) — `axe keystore` |
+| `POST /api/projects/:slug/keystore` | multipart: `keystore`, `keyAlias`, `storePassword`, `keyPassword?` | stores it; `aab` builds are signed with it — `axe keystore set` |
+| `DELETE /api/projects/:slug/keystore` | — | removes the row and the file — `axe keystore rm` |
 | `POST /api/builds` | multipart: `projectSlug`, `buildType`, `profile`, `abi`, `ota`, file `tarball` | `{ buildId }` |
 | `GET /api/builds` | — | 100 most recent builds |
 | `GET /api/builds/:id` | — | one build with all its metadata |
@@ -1455,14 +1575,13 @@ make up                  # clean-cache stops the containers to release the volum
 then delete old builds from the dashboard — that is the only thing that removes artifacts,
 tarballs and logs, and it tells you how much each one freed (section 13).
 
-**Then avoid it next time.** Leave **~30 GB free** before an `--abi all` build. Better, do not ask
-for `all` unless you need it: `--abi arm64-v8a,armeabi-v7a` covers every real phone, halves the
-native output, and Play still splits the bundle per device so users download no more than they
-would have.
+**Then avoid it next time.** Leave **~30 GB free** before an `-a all` build. Better, do not ask for
+`all` unless you need it: `-a phone` covers every real phone, halves the native output, and Play
+still splits the bundle per device so users download no more than they would have.
 
 ```bash
-axe build --type aab --abi arm64-v8a,armeabi-v7a
-axe rebuild <buildId> --abi arm64-v8a,armeabi-v7a   # same source, no re-upload
+axe build -t aab -a phone
+axe rebuild last -a phone      # same source, no re-upload
 ```
 
 A build killed this way is safe to re-run: no state survived it.
@@ -1483,7 +1602,7 @@ Another build is running — only one runs at a time. Open the one that is runni
 ### Every build is slow
 
 Check the caches were not recently wiped (`make clean-cache` empties all three, making the next
-build behave like a first build). Check `--abi` is not `all`.
+build behave like a first build). Check `-a` is not `all`.
 
 ### The OTA update never arrives
 

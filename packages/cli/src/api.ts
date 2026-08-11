@@ -40,6 +40,48 @@ export function getBuild(cfg: GlobalConfig, id: string) {
   return request(cfg, `/api/builds/${id}`);
 }
 
+export interface BuildSummary {
+  id: string;
+  status: string;
+  buildType: string;
+  createdAt: string;
+  project?: { slug: string; name: string };
+}
+
+/** 100 most recent builds across every project, newest first. */
+export function listBuilds(cfg: GlobalConfig): Promise<BuildSummary[]> {
+  return request(cfg, "/api/builds");
+}
+
+export interface KeystoreStatus {
+  configured: boolean;
+  keyAlias?: string;
+  file?: string;
+}
+
+export function getKeystore(cfg: GlobalConfig, slug: string): Promise<KeystoreStatus> {
+  return request(cfg, `/api/projects/${slug}/keystore`);
+}
+
+export function setKeystore(
+  cfg: GlobalConfig,
+  slug: string,
+  ks: { file: Buffer; filename: string; keyAlias: string; storePassword: string; keyPassword?: string },
+): Promise<KeystoreStatus> {
+  const form = new FormData();
+  form.set("keystore", new Blob([new Uint8Array(ks.file)]), ks.filename);
+  form.set("keyAlias", ks.keyAlias);
+  form.set("storePassword", ks.storePassword);
+  // Omitted rather than duplicated: the server falls back to storePassword,
+  // which is what pressing Enter at keytool's last prompt produces.
+  if (ks.keyPassword) form.set("keyPassword", ks.keyPassword);
+  return request(cfg, `/api/projects/${slug}/keystore`, { method: "POST", body: form });
+}
+
+export function deleteKeystore(cfg: GlobalConfig, slug: string): Promise<KeystoreStatus> {
+  return request(cfg, `/api/projects/${slug}/keystore`, { method: "DELETE" });
+}
+
 export function releaseBuild(
   cfg: GlobalConfig,
   id: string,
