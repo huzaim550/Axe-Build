@@ -67,11 +67,25 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     return Response.json({ error: "keystore file is implausibly large" }, { status: 413 });
   }
 
-  await fsp.mkdir(KEYSTORES_DIR, { recursive: true });
   // Named for the project, not the upload, so replacing a key overwrites the
   // old one rather than leaving a stale copy on the volume forever.
   const dest = path.join(KEYSTORES_DIR, `${project.slug}.jks`);
-  await fsp.writeFile(dest, Buffer.from(await file.arrayBuffer()), { mode: 0o600 });
+  try {
+    await fsp.mkdir(KEYSTORES_DIR, { recursive: true });
+    await fsp.writeFile(dest, Buffer.from(await file.arrayBuffer()), { mode: 0o600 });
+  } catch (err) {
+    // An uncaught throw here is a bare 500 with no body, which sends whoever
+    // hit it off to read container logs to discover something as ordinary as a
+    // full disk or an unwritable volume. Say which, in the response.
+    const code = (err as NodeJS.ErrnoException)?.code;
+    const reason =
+      code === "EACCES" || code === "EPERM"
+        ? `${KEYSTORES_DIR} is not writable by this container — check the keystores volume`
+        : code === "ENOSPC"
+          ? "no space left on the server's disk"
+          : `${code ?? "unknown error"} writing the keystore`;
+    return Response.json({ error: `could not store the keystore: ${reason}` }, { status: 500 });
+  }
 
   const data = { path: dest, keyAlias, storePassword, keyPassword };
   const keystore = await db().keystore.upsert({

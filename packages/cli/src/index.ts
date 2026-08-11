@@ -289,16 +289,40 @@ keystore
       ? await promptSecret("Key password: ")
       : undefined;
 
-    // Typing the alias from memory is the step people get wrong, and the error
-    // it produces surfaces deep inside Gradle an hour later. keytool already
-    // knows it; ask, and only fall back to demanding --alias.
-    const keyAlias = opts.alias ?? soleAliasIn(resolved, storePassword);
-    if (!keyAlias) {
+    // Ask keytool what is actually in the file before sending anything. This
+    // catches the two mistakes the server cannot: a password that does not open
+    // the keystore, and an alias that is not in it.
+    const found = inspectKeystore(resolved, storePassword);
+
+    if (found.kind === "bad-password") {
       throw new Error(
-        "Could not work out the key alias — pass it explicitly:\n" +
-          `  axe keystore set ${file} --alias <alias>\n` +
-          `  (list them with: keytool -list -keystore ${file})`,
+        `That password does not open ${path.basename(resolved)}. Nothing was uploaded.\n` +
+          `  It is the password you typed at keytool's first prompt when you created the key.`,
       );
+    }
+
+    if (found.kind === "ok" && opts.alias && !found.aliases.includes(opts.alias)) {
+      throw new Error(
+        `No key called '${opts.alias}' in ${path.basename(resolved)}. Nothing was uploaded.\n` +
+          `  It contains: ${found.aliases.join(", ")}`,
+      );
+    }
+
+    // Typing the alias from memory is the other step people get wrong, and the
+    // error it produces surfaces deep inside Gradle an hour later.
+    const keyAlias =
+      opts.alias ?? (found.kind === "ok" && found.aliases.length === 1 ? found.aliases[0] : undefined);
+
+    if (!keyAlias) {
+      const detail =
+        found.kind === "ok"
+          ? `  ${path.basename(resolved)} holds more than one key: ${found.aliases.join(", ")}`
+          : `  (keytool could not tell us — list them with: keytool -list -keystore ${file})`;
+      throw new Error(`Which key? Pass it explicitly:\n  axe keystore set ${file} --alias <alias>\n${detail}`);
+    }
+
+    if (found.kind === "unavailable") {
+      console.warn(`note: could not verify the password with keytool — uploading it unchecked.`);
     }
 
     const r = await setKeystore(cfg, projectSlug, {
@@ -329,27 +353,45 @@ keystore
     console.log(`The server's copy is gone. Your own .jks is untouched — do not lose it.`);
   });
 
+type Inspection =
+  | { kind: "ok"; aliases: string[] }
+  | { kind: "bad-password" }
+  | { kind: "unavailable" };
+
 /**
- * The one alias in a keystore, or null if that cannot be established.
+ * Ask keytool what is in a keystore, and whether this password opens it.
  *
  * The password goes in on stdin, never on the argv: keytool accepts -storepass
  * but anything passed that way is readable in `ps` by every user on the box.
- * A localised or absent keytool just means we ask for --alias instead.
+ *
+ * Telling "wrong password" apart from "could not parse the output" is the whole
+ * point. The server stores whatever password it is given without checking it,
+ * so a typo here is not caught by anything until Gradle fails an hour into an
+ * aab build with an error that names neither this command nor the password.
  */
-function soleAliasIn(file: string, storePassword: string): string | null {
+function inspectKeystore(file: string, storePassword: string): Inspection {
   const r = spawnSync("keytool", ["-list", "-keystore", file], {
     input: `${storePassword}\n`,
     encoding: "utf8",
   });
-  if (r.error || r.status !== 0 || !r.stdout) return null;
+  if (r.error) return { kind: "unavailable" };
 
-  const aliases = r.stdout
+  const output = `${r.stdout ?? ""}${r.stderr ?? ""}`;
+  if (r.status !== 0) {
+    // keytool says "keystore password was incorrect" for a JKS/PKCS12 whose
+    // password is wrong, and "Keystore was tampered with" for some older files.
+    return /password was incorrect|tampered with/i.test(output)
+      ? { kind: "bad-password" }
+      : { kind: "unavailable" };
+  }
+
+  const aliases = (r.stdout ?? "")
     .split("\n")
     .filter((line) => line.includes("PrivateKeyEntry"))
     .map((line) => line.split(",")[0]?.trim())
     .filter((a): a is string => Boolean(a));
 
-  return aliases.length === 1 ? aliases[0]! : null;
+  return aliases.length ? { kind: "ok", aliases } : { kind: "unavailable" };
 }
 
 /** Accepts a real build id, or `last` for the newest build of the current project. */

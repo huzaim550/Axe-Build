@@ -27,7 +27,7 @@ RUN npm install -g pnpm@9
 # volume is seeded from the image directory it mounts over, ownership included,
 # so the SDK volume comes up writable by the build user with no runtime chown.
 RUN mkdir -p /opt/android-sdk /workspaces /cache/gradle /cache/npm /cache/ccache \
-             /data/uploads /data/artifacts /data/db /repo \
+             /data/uploads /data/artifacts /data/db /data/keystores /repo \
     && chown -R node:node /opt/android-sdk /workspaces /cache /data /repo
 
 ENV ANDROID_HOME=/opt/android-sdk \

@@ -6,8 +6,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-cert
     && npm install -g pnpm@9
 
 # Same non-root uid as the worker image so the shared volumes (db-data, uploads,
-# artifacts) are writable by both containers no matter which initializes them.
-RUN mkdir -p /data/db /data/uploads /data/artifacts /repo \
+# artifacts, keystores) are writable by both containers no matter which
+# initializes them.
+#
+# Every path a named volume mounts over must be listed here. A volume whose
+# mount point does not exist in the image is created root-owned by Docker, and
+# this container runs as `node` -- so the omission does not fail at start, it
+# fails on the first write, as a bare 500 from whichever route tried it.
+RUN mkdir -p /data/db /data/uploads /data/artifacts /data/keystores /repo \
     && chown -R node:node /data /repo
 
 USER node

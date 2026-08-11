@@ -32,8 +32,10 @@ function readLine(): Promise<string> {
   return new Promise((resolve) => {
     const rl = readline.createInterface({ input: process.stdin });
     rl.once("line", (line) => {
-      rl.close();
+      // Resolve BEFORE closing: rl.close() emits "close" synchronously, so
+      // closing first lets the handler below win the race and resolve "".
       resolve(line);
+      rl.close();
     });
     rl.once("close", () => resolve(""));
   });

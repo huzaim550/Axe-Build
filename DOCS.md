@@ -643,9 +643,10 @@ Three things it does so you do not have to:
 
 - **The password is prompted, never typed as an argument** — so it stays out of your shell history
   and out of `ps`. Piping also works (`echo "$PW" | axe keystore set key.jks`) for a script.
-- **The alias is read out of the keystore.** Getting it wrong is the classic mistake, and the error
-  it causes surfaces deep inside Gradle an hour later. If the file holds more than one key — or
-  `keytool` is not installed — it asks you for `--alias` instead.
+- **The password and the alias are checked against the file before anything is sent.** A password
+  that does not open the keystore is refused here, where the message says so, rather than an hour
+  into a Gradle build. The alias is read out of the keystore, so there is nothing to type; if the
+  file holds more than one key, it asks for `--alias`.
 - **The slug comes from `axe.json`**, so there is no URL to assemble.
 
 | Flag | When you need it |
@@ -1412,10 +1413,21 @@ shell history and is visible in `ps` to every user on the machine. When stdin is
 password is read as a plain line instead, so `echo "$PW" | axe keystore set key.jks` works in a
 script without a second code path.
 
-The alias is read out of the keystore with `keytool -list` (the password goes in on stdin there
-too, for the same reason). If exactly one key is found, that is the alias; otherwise you are asked
-for `--alias`. This exists because a mistyped alias is not caught anywhere until Gradle fails with
-`No key with alias` — an hour into a build.
+Before anything is sent, `keytool -list` is run against the file (password on stdin there too, for
+the same reason) and the result decides what happens:
+
+| keytool says | `axe keystore set` does |
+|---|---|
+| the password does not open it | refuses, and says so — **nothing is uploaded** |
+| `--alias` names a key that is not in there | refuses, and lists the ones that are |
+| exactly one key inside | uses that alias, no `--alias` needed |
+| several keys inside | asks for `--alias`, listing them |
+| keytool missing or unparseable | uploads anyway, with a note that it could not verify |
+
+That pre-flight check earns its place because **the server does not validate any of this**. It
+stores whatever password and alias it is handed, and a wrong one is not caught by anything until
+Gradle fails with `Keystore was tampered with` or `No key with alias` — an hour into an `aab`
+build, in an error that mentions neither this command nor the password.
 
 **`axe keystore rm`** deletes the server's copy and its database row; your own `.jks` is untouched.
 The next `aab` build is debug-signed again. It says which alias it removed, so you have a record if
